@@ -32,10 +32,20 @@ static const char BG[8][7] = {"\e[40m","\e[41m","\e[42m","\e[43m","\e[44m","\e[4
 #define LEAVE_LINE_MODE fputs("\e[B",stdout)
 #define DIAMOND_SYMBOL 96
 
+//#define FPGA
+#ifndef FPGA
 int key;
 int key_received;
 int key_wasd_received;
 int key_pressed[6];
+#endif
+#ifdef FPGA
+volatile int key;
+volatile int key_received;
+volatile int key_wasd_received;
+volatile int key_pressed[6];
+#endif
+
 #define NUM_KEYS 6
 #define KEY_WASD 0
 #define KEY_Q 1
@@ -65,11 +75,12 @@ void cleanup_handler(int signum);
 
 #define SNAKE1_HEAD 'A'
 #define SNAKE1_BODY 'a'
+#define SNAKE2_HEAD 'B'
+#define SNAKE2_BODY 'b'
 #define EMPTY_TILE ' '
 #define OBSTACLE '%'
 #define FOOD '$'
 
-#define OPTIMIZE
 #define CHECK_WINSIZE
 struct winsize w;
 
@@ -93,11 +104,12 @@ snake_segment copy_seg(snake_segment* segment)
 
 char board[ROWS][COLS];
 snake_segment* snake_1;
+int length_1;
 snake_segment* snake_2;
+int length_2;
 
 int X_COORD;
 int Y_COORD;
-int length;
 int global_food_value;
 
 int p1_score;
@@ -107,7 +119,7 @@ int gameover;
 int paused;
 
 void init_snake(FILE* file);
-void reorder_snake(snake_segment**, int);
+void reorder_snake(snake_segment**, int, int);
 void display();
 void move_snake();
 void make_food();
@@ -118,6 +130,7 @@ void print_status(const char* status, int len);
 void print_green(char c) { printf("\033[1;32m%c\033[0m", c); }
 void print_red(char c) { printf("\033[1;31m%c\033[0m", c); }
 void print_beige(char c) { printf("\033[0;33m%c\033[0m", c); }
+void print_blue(char c) { printf("\033[1;34m%c\033[0m", c); }
 
 int main (int argc, char* argv[])
 {
@@ -203,12 +216,13 @@ int main (int argc, char* argv[])
 void init_snake(FILE* file)
 {
 	char c;
-	length = 0;
+	length_1 = length_2 = 0;
 	p1_score = p2_score = 0;
 	global_food_value = 1;
 
 	snake_1 = (snake_segment*)malloc(sizeof(snake_segment) * MAX_LEN);
-
+	snake_2 = (snake_segment*)malloc(sizeof(snake_segment) * MAX_LEN);
+	
 	int s1_seg = 0;
 	
 	int fx = 0;
@@ -226,17 +240,31 @@ void init_snake(FILE* file)
 				break;
 			case 'A':
 				board[fy][fx] = SNAKE1_HEAD;
-				snake_1[length].x = fx;
-				snake_1[length].y = fy;
-				snake_1[length].chr = 'A';
-				length++;
+				snake_1[length_1].x = fx;
+				snake_1[length_1].y = fy;
+				snake_1[length_1].chr = 'A';
+				length_1++;
 				break;
 			case 'a':
 				board[fy][fx] = SNAKE1_BODY;
-				snake_1[length].x = fx;
-				snake_1[length].y = fy;
-				snake_1[length].chr = 'a';
-				length++;
+				snake_1[length_1].x = fx;
+				snake_1[length_1].y = fy;
+				snake_1[length_1].chr = 'a';
+				length_1++;
+				break;
+			case 'B':
+				board[fy][fx] = SNAKE2_HEAD;
+				snake_2[length_2].x = fx;
+				snake_2[length_2].y = fy;
+				snake_2[length_2].chr = 'B';
+				length_2++;
+				break;
+			case 'b':
+				board[fy][fx] = SNAKE2_BODY;
+				snake_2[length_2].x = fx;
+				snake_2[length_2].y = fy;
+				snake_2[length_2].chr = 'b';
+				length_2++;
 				break;
 			case '\n':
 				fy++;
@@ -247,51 +275,65 @@ void init_snake(FILE* file)
 		}
 		fx++;
 	}
-	reorder_snake(&snake_1, length);
+	
+	reorder_snake(&snake_1, length_1, 1);
+	reorder_snake(&snake_2, length_2, 2);
 	make_food();
 }
 
-void reorder_snake(snake_segment** snake, int len)
+void reorder_snake(snake_segment** snake, int len, int player)
 {
+	char head_chr, body_chr;
+	if (player == 1)
+	{
+		head_chr = 'A';
+		body_chr = 'a';
+	}
+	else if (player == 2)
+	{
+		head_chr = 'B';
+		body_chr = 'b';
+	}
+	
 	snake_segment* new_snake = (snake_segment*)malloc(sizeof(snake_segment) * len);
 	
 	//First find the head
  	int i;
-	for (i = 0; i < length; i++)
+	for (i = 0; i < length_1; i++)
 	{
-		if (((*snake)[i]).chr == 'A')
+		if (((*snake)[i]).chr == head_chr)
 			new_snake[0] = (*snake)[i];
 	}
 
 	for (i = 0; i < len; i++)
 	{
-		if (board[new_snake[i].y - 1][new_snake[i].x] == 'a') //Probe up
+		if (board[new_snake[i].y - 1][new_snake[i].x] == body_chr) //Probe up
 		{
 			new_snake[i].dir = DOWN;
 			new_snake[i + 1].y = new_snake[i].y - 1;
 			new_snake[i + 1].x = new_snake[i].x;
-			new_snake[i + 1].chr = 'a';
+			new_snake[i + 1].chr = body_chr;
 		}
-		else if (board[new_snake[i].y + 1][new_snake[i].x] == 'a') //Probe down
+		else if (board[new_snake[i].y + 1][new_snake[i].x] == body_chr) //Probe down
 		{
 			new_snake[i].dir = UP;
 			new_snake[i + 1].y = new_snake[i].y + 1;
 			new_snake[i + 1].x = new_snake[i].x;
-			new_snake[i + 1].chr = 'a';
+			new_snake[i + 1].chr = body_chr;
 		}
-		else if (board[new_snake[i].y][new_snake[i].x - 1] == 'a') //Probe left
+		else if (board[new_snake[i].y][new_snake[i].x - 1] == body_chr) //Probe left
 		{
 			new_snake[i].dir = RIGHT;
 			new_snake[i + 1].y = new_snake[i].y;
 			new_snake[i + 1].x = new_snake[i].x - 1;
-			new_snake[i + 1].chr = 'a';
+			new_snake[i + 1].chr = body_chr;
 		}
-		else if (board[new_snake[i].y][new_snake[i].x + 1] == 'a') //Probe right
+		else if (board[new_snake[i].y][new_snake[i].x + 1] == body_chr) //Probe right
 		{
 			new_snake[i].dir = LEFT;
 			new_snake[i + 1].y = new_snake[i].y;
 			new_snake[i + 1].x = new_snake[i].x + 1;
-			new_snake[i + 1].chr = 'a';
+			new_snake[i + 1].chr = body_chr;
 		}
 		else //we're at the tail, it has no tiles around it so we need to the look at the prior segment to find it's direction
 		{
@@ -330,6 +372,18 @@ void display()
 				printf("\033[0m"); //End brown
 				print_red(FOOD);
 				printf("\033[0;33m"); //Restart brown
+			}
+			else if (board[i][j] == SNAKE1_BODY || board[i][j] == SNAKE1_HEAD)
+			{
+				printf("\033[0m");
+				print_green(board[i][j]);
+				printf("\033[0;33m");
+			}
+			else if (board[i][j] == SNAKE2_BODY || board[i][j] == SNAKE2_HEAD)
+			{
+				printf("\033[0m");
+				print_blue(board[i][j]);
+				printf("\033[0;33m");
 			}
 			else if (board[i][j] == OBSTACLE)
 				printf("%c", OBSTACLE);
@@ -384,13 +438,13 @@ void move_snake()
 	
 	
 	snake_segment temp_head = copy_seg(&snake_1[0]);
-	snake_segment temp_tail = copy_seg(&snake_1[length - 1]);
+	snake_segment temp_tail = copy_seg(&snake_1[length_1 - 1]);
 	
 	//Update each segments direction and position
 	snake_segment t1 = snake_1[0];
 	snake_segment t2;
 	int i;
-	for (i = 1; i < length; i++)
+	for (i = 1; i < length_1; i++)
 	{
 		t2 = snake_1[i];
 		//fprintf(stderr, "Changing snake_1[%d]'s pos from %d (%d,%d) to snake_1[%d]'s position: %d(%d,%d)\n", i, snake_1[i].dir, snake_1[i].x, snake_1[i].y, i - 1, t1.dir, t1.x, t1.y);
@@ -453,7 +507,7 @@ void move_snake()
 	else if (board[snake_1[0].y][snake_1[0].x] == FOOD)
 	{
 		board[snake_1[0].y][snake_1[0].x] = snake_1[0].chr;
-		length += global_food_value;
+		length_1 += global_food_value;
 		p1_score += global_food_value;
 		make_food();
 		print_scores();
