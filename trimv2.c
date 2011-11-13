@@ -92,7 +92,9 @@ snake_segment copy_seg(snake_segment* segment)
 }
 
 char board[ROWS][COLS];
-snake_segment* snake;
+snake_segment* snake_1;
+snake_segment* snake_2;
+
 int X_COORD;
 int Y_COORD;
 int length;
@@ -105,6 +107,7 @@ int gameover;
 int paused;
 
 void init_snake(FILE* file);
+void reorder_snake(snake_segment**, int);
 void display();
 void move_snake();
 void make_food();
@@ -133,10 +136,8 @@ int main (int argc, char* argv[])
 	}
 	
 	init_snake(flevel);
-	//display();
-	return 0;
-	
-	
+	display();
+
 	//Check the window size:
 	#ifdef CHECK_WINSIZE
 		ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
@@ -205,103 +206,111 @@ void init_snake(FILE* file)
 	length = 0;
 	p1_score = p2_score = 0;
 	global_food_value = 1;
+
+	snake_1 = (snake_segment*)malloc(sizeof(snake_segment) * MAX_LEN);
+
+	int s1_seg = 0;
 	
-	snake_segment* temp_snake = (snake_segment*)malloc(sizeof(snake_segment) * 7);
-	snake = (snake_segment*)malloc(sizeof(snake_segment) * MAX_LEN);
+	int fx = 0;
+	int fy = 0;
 	
-	if (file == NULL)
+	while ((c = getc(file)) != EOF)
 	{
-		X_COORD = INIT_X;
-		Y_COORD = INIT_Y;
-		length = INIT_LEN;
-	
-		int i;
-		int j;
-		
-		for (i = 0; i < ROWS; i++)
+		switch (c)
 		{
-			for (j = 0; j < COLS; j++)
-				board[i][j] = EMPTY_TILE;
+			case '0':
+				board[fy][fx] = EMPTY_TILE;
+				break;
+			case '1':
+				board[fy][fx] = OBSTACLE;
+				break;
+			case 'A':
+				board[fy][fx] = SNAKE1_HEAD;
+				snake_1[length].x = fx;
+				snake_1[length].y = fy;
+				snake_1[length].chr = 'A';
+				length++;
+				break;
+			case 'a':
+				board[fy][fx] = SNAKE1_BODY;
+				snake_1[length].x = fx;
+				snake_1[length].y = fy;
+				snake_1[length].chr = 'a';
+				length++;
+				break;
+			case '\n':
+				fy++;
+				fx = -1;
+				break;
+			default:
+				printf("Invaild character: %c \n", c);
 		}
-		
-		board[INIT_Y][INIT_X] = SNAKE1_HEAD;
-		snake[0].x = INIT_X;
-		snake[0].y = INIT_Y;
-		snake[0].dir = RIGHT;
-		//fprintf(stderr, "snake[%d]'s pos set to  (%d,%d)\n", 0, snake[0].x, snake[0].y);
-		for (i = 1; i < INIT_LEN; i++)
-		{
-			board[INIT_Y][INIT_X - i] = SNAKE1_BODY;
-			snake[i].x = INIT_X - i;
-			snake[i].y = INIT_Y;
-			snake[i].dir = RIGHT;
-			//fprintf(stderr, "snake[%d]'s pos set to  (%d,%d)\n", i, snake[i].x, snake[i].y);
-		}
+		fx++;
 	}
-	else
-	{
-		int s1_seg = 0;
-		
-		int fx = 0;
-		int fy = 0;
-		
-		while ((c = getc(file)) != EOF)
-		{
-			switch (c)
-			{
-				case '0':
-					board[fy][fx] = EMPTY_TILE;
-					break;
-				case '1':
-					board[fy][fx] = OBSTACLE;
-					break;
-				case 'A':
-					board[fy][fx] = SNAKE1_HEAD;
-					temp_snake[length].x = fx;
-					temp_snake[length].y = fy;
-					temp_snake[length].chr = 'A';
-					length++;
-					break;
-				case 'a':
-					board[fy][fx] = SNAKE1_BODY;
-					temp_snake[length].x = fx;
-					temp_snake[length].y = fy;
-					temp_snake[length].chr = 'a';
-					length++;
-					break;
-				case '\n':
-					fy++;
-					fx = -1;
-					break;
-				default:
-					printf("Invaild character in config file!");
-			}
-			fx++;
-		}
-		
-		/*
-		 * At this point board[][] is setup and ready to be printed
-		 * with display(). But the snake is still "unorganized",
-		 * ie, the tail could've been read first etc...
-		 * So need to re-order the indices and give each segment a direction!...
-		 */
-		
-		
-	}
-	//make_food();
+	reorder_snake(&snake_1, length);
+	make_food();
 }
 
 void reorder_snake(snake_segment** snake, int len)
 {
 	snake_segment* new_snake = (snake_segment*)malloc(sizeof(snake_segment) * len);
-	//memcpy(snake_copy, *snake, sizeof(snake_segment) * len);
 	
-	int i;
-	for (i = 0; i < 0; i++)
+	//First find the head
+ 	int i;
+	for (i = 0; i < length; i++)
 	{
-		if (*snake[i].chr == 'A')
-			
+		if (((*snake)[i]).chr == 'A')
+			new_snake[0] = (*snake)[i];
 	}
+
+	for (i = 0; i < len; i++)
+	{
+		if (board[new_snake[i].y - 1][new_snake[i].x] == 'a') //Probe up
+		{
+			new_snake[i].dir = DOWN;
+			new_snake[i + 1].y = new_snake[i].y - 1;
+			new_snake[i + 1].x = new_snake[i].x;
+			new_snake[i + 1].chr = 'a';
+		}
+		else if (board[new_snake[i].y + 1][new_snake[i].x] == 'a') //Probe down
+		{
+			new_snake[i].dir = UP;
+			new_snake[i + 1].y = new_snake[i].y + 1;
+			new_snake[i + 1].x = new_snake[i].x;
+			new_snake[i + 1].chr = 'a';
+		}
+		else if (board[new_snake[i].y][new_snake[i].x - 1] == 'a') //Probe left
+		{
+			new_snake[i].dir = RIGHT;
+			new_snake[i + 1].y = new_snake[i].y;
+			new_snake[i + 1].x = new_snake[i].x - 1;
+			new_snake[i + 1].chr = 'a';
+		}
+		else if (board[new_snake[i].y][new_snake[i].x + 1] == 'a') //Probe right
+		{
+			new_snake[i].dir = LEFT;
+			new_snake[i + 1].y = new_snake[i].y;
+			new_snake[i + 1].x = new_snake[i].x + 1;
+			new_snake[i + 1].chr = 'a';
+		}
+		else //we're at the tail, it has no tiles around it so we need to the look at the prior segment to find it's direction
+		{
+			if (new_snake[i - 1].x == new_snake[i].x)
+				new_snake[i].dir = new_snake[i - 1].dir;
+			else if (new_snake[i - 1].y == new_snake[i].y)
+				new_snake[i].dir = new_snake[i - 1].dir;
+		}
+		board[new_snake[i].y][new_snake[i].x] = EMPTY_TILE; //remove the char from the board to prevvent it from being probed twice
+	}
+	
+	//Place the snake back on the board...
+	for (i = 0; i < len; i++)
+		board[new_snake[i].y][new_snake[i].x] = new_snake[i].chr;
+	
+	//copy the snake back into the target
+	memcpy(*snake, new_snake, sizeof(snake_segment) * len);
+	
+	//Done!
 }
 
 void display()
@@ -352,6 +361,8 @@ void print_scores()
 
 void print_status(const char* status, int len)
 {
+	SET_FG_COLOR(WHITE);
+	SET_BG_COLOR(BLUE);
 	MOVE_CURSOR(ROWS+1, 0);
 	printf("%s", status);
 	int i;
@@ -372,69 +383,76 @@ void move_snake()
 	 */
 	
 	
-	snake_segment temp_head = copy_seg(&snake[0]);
-	snake_segment temp_tail = copy_seg(&snake[length - 1]);
+	snake_segment temp_head = copy_seg(&snake_1[0]);
+	snake_segment temp_tail = copy_seg(&snake_1[length - 1]);
 	
 	//Update each segments direction and position
-	snake_segment t1 = snake[0];
+	snake_segment t1 = snake_1[0];
 	snake_segment t2;
 	int i;
 	for (i = 1; i < length; i++)
 	{
-		t2 = snake[i];
-		//fprintf(stderr, "Changing snake[%d]'s pos from %d (%d,%d) to snake[%d]'s position: %d(%d,%d)\n", i, snake[i].dir, snake[i].x, snake[i].y, i - 1, t1.dir, t1.x, t1.y);
-		snake[i] = t1;
+		t2 = snake_1[i];
+		//fprintf(stderr, "Changing snake_1[%d]'s pos from %d (%d,%d) to snake_1[%d]'s position: %d(%d,%d)\n", i, snake_1[i].dir, snake_1[i].x, snake_1[i].y, i - 1, t1.dir, t1.x, t1.y);
+		snake_1[i] = t1;
 		t1 = t2;
 	}
 	
 	//Change the head's direction and find it's new position
-	switch(snake[0].dir)
+	switch(snake_1[0].dir)
 	{
 		case UP:
-			if (snake[0].y == 0)
-				snake[0].y = ROWS - 1;
+			if (snake_1[0].y == 0)
+				snake_1[0].y = ROWS - 1;
 			else
-				snake[0].y--;
+				snake_1[0].y--;
 			
-			snake[0].dir = UP;
+			snake_1[0].dir = UP;
 			break;
 		case DOWN:
-			if (snake[0].y == ROWS - 1)
-				snake[0].y = 0;
+			if (snake_1[0].y == ROWS - 1)
+				snake_1[0].y = 0;
 			else
-				snake[0].y++;
+				snake_1[0].y++;
 			
-			snake[0].dir = DOWN;
+			snake_1[0].dir = DOWN;
 			break;
 		case LEFT:
-			if (snake[0].x == 0)
-				snake[0].x = COLS - 1;
+			if (snake_1[0].x == 0)
+				snake_1[0].x = COLS - 1;
 			else
-				snake[0].x--;
+				snake_1[0].x--;
 			
-			snake[0].dir = LEFT;
+			snake_1[0].dir = LEFT;
 			break;
 		case RIGHT:
-			if (snake[0].x == COLS - 1)
-				snake[0].x = 0;
+			if (snake_1[0].x == COLS - 1)
+				snake_1[0].x = 0;
 			else
-				snake[0].x++;
+				snake_1[0].x++;
 			
-			snake[0].dir = RIGHT;
+			snake_1[0].dir = RIGHT;
 			break;
 		default:
 			return;
 	}
 	
 	//Collision and food detection
-	if (board[snake[0].y][snake[0].x] == SNAKE1_BODY)
+	if (board[snake_1[0].y][snake_1[0].x] == SNAKE1_BODY)
 	{
-		print_status((char*)"Game over!", strlen((char*)"Game over!"));
+		print_status((char*)"You got all tangled up!", strlen((char*)"You got all tangled up!"));
 		gameover = TRUE;
 		return;
 	}
-	else if (board[snake[0].y][snake[0].x] == FOOD)
+	else if (board[snake_1[0].y][snake_1[0].x] == OBSTACLE)
 	{
+		print_status((char*)"Watch out for the walls!", strlen((char*)"Watch out for the walls!"));
+		gameover = TRUE;
+		return;
+	}
+	else if (board[snake_1[0].y][snake_1[0].x] == FOOD)
+	{
+		board[snake_1[0].y][snake_1[0].x] = snake_1[0].chr;
 		length += global_food_value;
 		p1_score += global_food_value;
 		make_food();
@@ -446,12 +464,12 @@ void move_snake()
 	}
 	
 	//Update the board at the head, head-1 and tail
-	board[snake[0].y + 1][snake[0].x] = SNAKE1_HEAD;
-	board[temp_head.y + 1][temp_head.x] = SNAKE1_BODY;
-	board[temp_tail.y + 1][temp_tail.x] = EMPTY_TILE;
+	board[snake_1[0].y][snake_1[0].x] = SNAKE1_HEAD;
+	board[temp_head.y][temp_head.x] = SNAKE1_BODY;
+	board[temp_tail.y][temp_tail.x] = EMPTY_TILE;
 	
 	//Print the head's character on the terminal
-	MOVE_CURSOR(snake[0].y + 1, snake[0].x);
+	MOVE_CURSOR(snake_1[0].y + 1, snake_1[0].x);
 	print_green(SNAKE1_HEAD);
 	
 	//Print the head-1 character
@@ -535,26 +553,26 @@ void keyboard_handler(int signum)
 		case 'w':
 			key_pressed[KEY_WASD] = NORTH;
 			key_wasd_received = TRUE;
-			if (snake[0].dir != DOWN)
-				snake[0].dir = UP;
+			if (snake_1[0].dir != DOWN)
+				snake_1[0].dir = UP;
 			break;
 		case 's':
 			key_pressed[KEY_WASD] = SOUTH;
 			key_wasd_received = TRUE;
-			if (snake[0].dir != UP)
-				snake[0].dir = DOWN;
+			if (snake_1[0].dir != UP)
+				snake_1[0].dir = DOWN;
 			break;
 		case SNAKE1_BODY:
 			key_pressed[KEY_WASD] = WEST;
 			key_wasd_received = TRUE;
-			if (snake[0].dir != RIGHT)		
-				snake[0].dir = LEFT;
+			if (snake_1[0].dir != RIGHT)		
+				snake_1[0].dir = LEFT;
 			break;
 		case 'd':
 			key_pressed[KEY_WASD] = EAST;
 			key_wasd_received = TRUE;
-			if (snake[0].dir != LEFT)
-				snake[0].dir = RIGHT;
+			if (snake_1[0].dir != LEFT)
+				snake_1[0].dir = RIGHT;
 			break;
 		case 'q':
 		case 'Q':
