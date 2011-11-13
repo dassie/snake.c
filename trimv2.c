@@ -102,6 +102,9 @@ snake_segment copy_seg(snake_segment* segment)
 	return s;
 }
 
+#define P1 1
+#define P2 2
+
 char board[ROWS][COLS];
 snake_segment* snake_1;
 int length_1;
@@ -121,7 +124,7 @@ int paused;
 void init_snake(FILE* file);
 void reorder_snake(snake_segment**, int, int);
 void display();
-void move_snake();
+void move_snake(snake_segment** s, int* len, int* score, int player);
 void make_food();
 
 void print_scores();
@@ -196,8 +199,8 @@ int main (int argc, char* argv[])
 			}
 			key_received = FALSE;
 		}
-		
-		move_snake();
+
+		move_snake(&snake_1, &length_1, &p1_score, P1);
 		
 		FLUSH;
 
@@ -284,12 +287,12 @@ void init_snake(FILE* file)
 void reorder_snake(snake_segment** snake, int len, int player)
 {
 	char head_chr, body_chr;
-	if (player == 1)
+	if (player == P1)
 	{
 		head_chr = 'A';
 		body_chr = 'a';
 	}
-	else if (player == 2)
+	else if (player == P2)
 	{
 		head_chr = 'B';
 		body_chr = 'b';
@@ -398,35 +401,7 @@ void display()
 	printf("\033[0m");
 }
 
-void print_scores()
-{
-	SET_FG_COLOR(WHITE);
-	SET_BG_COLOR(BLUE);
-	MOVE_CURSOR(0, 0);
-	//LEAVE_LINE_MODE;
-	printf("Player 1: %2d                                                         Player2: %2d\n", p1_score, p2_score);
-	MOVE_CURSOR(ROWS+1,0);
-	printf("                                                                                \n");
-	MOVE_CURSOR(1, 0);
-	/*ENTER_LINE_MODE;
-	SET_BG_COLOR(WHITE);
-	SET_FG_COLOR(BLACK);*/
-}
-
-void print_status(const char* status, int len)
-{
-	SET_FG_COLOR(WHITE);
-	SET_BG_COLOR(BLUE);
-	MOVE_CURSOR(ROWS+1, 0);
-	printf("%s", status);
-	int i;
-	for (i = 0; i < 80 - len; i++)
-		printf(" ");
-	printf("\n");
-	MOVE_CURSOR(1, 0);
-}
-
-void move_snake()
+void move_snake(snake_segment** s, int* len, int* score, int player)
 {
 	/* Step for moving the snake
 	 * 1. Update the directions for all the segments
@@ -437,78 +412,78 @@ void move_snake()
 	 */
 	
 	
-	snake_segment temp_head = copy_seg(&snake_1[0]);
-	snake_segment temp_tail = copy_seg(&snake_1[length_1 - 1]);
+	snake_segment temp_head = copy_seg(&(*s)[0]);
+	snake_segment temp_tail = copy_seg(&(*s)[(*len) - 1]);
 	
 	//Update each segments direction and position
-	snake_segment t1 = snake_1[0];
+	snake_segment t1 = (*s)[0];
 	snake_segment t2;
 	int i;
-	for (i = 1; i < length_1; i++)
+	for (i = 1; i < *len; i++)
 	{
-		t2 = snake_1[i];
+		t2 = (*s)[i];
 		//fprintf(stderr, "Changing snake_1[%d]'s pos from %d (%d,%d) to snake_1[%d]'s position: %d(%d,%d)\n", i, snake_1[i].dir, snake_1[i].x, snake_1[i].y, i - 1, t1.dir, t1.x, t1.y);
-		snake_1[i] = t1;
+		(*s)[i] = t1;
 		t1 = t2;
 	}
 	
 	//Change the head's direction and find it's new position
-	switch(snake_1[0].dir)
+	switch((*s)[0].dir)
 	{
 		case UP:
-			if (snake_1[0].y == 0)
-				snake_1[0].y = ROWS - 1;
+			if ((*s)[0].y == 0)
+				(*s)[0].y = ROWS - 1;
 			else
-				snake_1[0].y--;
+				(*s)[0].y--;
 			
-			snake_1[0].dir = UP;
+			(*s)[0].dir = UP;
 			break;
 		case DOWN:
-			if (snake_1[0].y == ROWS - 1)
-				snake_1[0].y = 0;
+			if ((*s)[0].y == ROWS - 1)
+				(*s)[0].y = 0;
 			else
-				snake_1[0].y++;
+				(*s)[0].y++;
 			
-			snake_1[0].dir = DOWN;
+			(*s)[0].dir = DOWN;
 			break;
 		case LEFT:
-			if (snake_1[0].x == 0)
-				snake_1[0].x = COLS - 1;
+			if ((*s)[0].x == 0)
+				(*s)[0].x = COLS - 1;
 			else
-				snake_1[0].x--;
+				(*s)[0].x--;
 			
-			snake_1[0].dir = LEFT;
+			(*s)[0].dir = LEFT;
 			break;
 		case RIGHT:
 			if (snake_1[0].x == COLS - 1)
-				snake_1[0].x = 0;
+				(*s)[0].x = 0;
 			else
-				snake_1[0].x++;
+				(*s)[0].x++;
 			
-			snake_1[0].dir = RIGHT;
+			(*s)[0].dir = RIGHT;
 			break;
 		default:
 			return;
 	}
 	
 	//Collision and food detection
-	if (board[snake_1[0].y][snake_1[0].x] == SNAKE1_BODY)
+	if (board[(*s)[0].y][(*s)[0].x] == SNAKE1_BODY)
 	{
 		print_status((char*)"You got all tangled up!", strlen((char*)"You got all tangled up!"));
 		gameover = TRUE;
 		return;
 	}
-	else if (board[snake_1[0].y][snake_1[0].x] == OBSTACLE)
+	else if (board[(*s)[0].y][(*s)[0].x] == OBSTACLE)
 	{
 		print_status((char*)"Watch out for the walls!", strlen((char*)"Watch out for the walls!"));
 		gameover = TRUE;
 		return;
 	}
-	else if (board[snake_1[0].y][snake_1[0].x] == FOOD)
+	else if (board[(*s)[0].y][(*s)[0].x] == FOOD)
 	{
-		board[snake_1[0].y][snake_1[0].x] = snake_1[0].chr;
-		length_1 += global_food_value;
-		p1_score += global_food_value;
+		board[(*s)[0].y][(*s)[0].x] = (*s)[0].chr;
+		*len += global_food_value;
+		*score += global_food_value;
 		make_food();
 		print_scores();
 		
@@ -518,17 +493,27 @@ void move_snake()
 	}
 	
 	//Update the board at the head, head-1 and tail
-	board[snake_1[0].y][snake_1[0].x] = SNAKE1_HEAD;
-	board[temp_head.y][temp_head.x] = SNAKE1_BODY;
+	if (player == P1)
+	{
+		board[(*s)[0].y][(*s)[0].x] = SNAKE1_HEAD;
+		board[temp_head.y][temp_head.x] = SNAKE1_BODY;
+		
+		MOVE_CURSOR((*s)[0].y + 1, (*s)[0].x);
+		print_green(SNAKE1_HEAD);
+		MOVE_CURSOR(temp_head.y + 1, temp_head.x);
+		print_green(SNAKE1_BODY);
+	}
+	else if (player == P2)
+	{
+		board[(*s)[0].y][(*s)[0].x] = SNAKE2_HEAD;
+		board[temp_head.y][temp_head.x] = SNAKE2_BODY;
+		
+		MOVE_CURSOR((*s)[0].y + 1, (*s)[0].x);
+		print_green(SNAKE2_HEAD);
+		MOVE_CURSOR(temp_head.y + 1, temp_head.x);
+		print_green(SNAKE2_BODY);
+	}
 	board[temp_tail.y][temp_tail.x] = EMPTY_TILE;
-	
-	//Print the head's character on the terminal
-	MOVE_CURSOR(snake_1[0].y + 1, snake_1[0].x);
-	print_green(SNAKE1_HEAD);
-	
-	//Print the head-1 character
-	MOVE_CURSOR(temp_head.y + 1, temp_head.x);
-	print_green(SNAKE1_BODY);
 	
 	//Print an empty tile where the tail was
 	MOVE_CURSOR(temp_tail.y + 1, temp_tail.x);
@@ -573,6 +558,34 @@ void make_food()
 	}
 
 	return;
+}
+
+void print_scores()
+{
+	SET_FG_COLOR(WHITE);
+	SET_BG_COLOR(BLUE);
+	MOVE_CURSOR(0, 0);
+	//LEAVE_LINE_MODE;
+	printf("Player 1: %2d                                                         Player2: %2d\n", p1_score, p2_score);
+	MOVE_CURSOR(ROWS+1,0);
+	printf("                                                                                \n");
+	MOVE_CURSOR(1, 0);
+	/*ENTER_LINE_MODE;
+	SET_BG_COLOR(WHITE);
+	SET_FG_COLOR(BLACK);*/
+}
+
+void print_status(const char* status, int len)
+{
+	SET_FG_COLOR(WHITE);
+	SET_BG_COLOR(BLUE);
+	MOVE_CURSOR(ROWS+1, 0);
+	printf("%s", status);
+	int i;
+	for (i = 0; i < 80 - len; i++)
+		printf(" ");
+	printf("\n");
+	MOVE_CURSOR(1, 0);
 }
 
 void init_term()
