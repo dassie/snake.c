@@ -184,6 +184,7 @@ int main (int argc, char* argv[])
 		printf("Invalid AI option: %s\n", argv[2]);
 		return 0;
 	}
+	
 	#ifdef FPGA
 		pb_file = open("/dev/pb_driver", O_RDWR);
 		if (pb_file == -1)
@@ -217,7 +218,11 @@ re_entry:
 		}
 	#endif
 	
-	srand(time(NULL));
+	if (argc == 4)
+		srand((int)argv[3]);
+	else
+		srand(time(NULL));
+	
 	init_term();
 
 	MOVE_CURSOR(0,0);
