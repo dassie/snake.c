@@ -193,10 +193,12 @@ int main (int argc, char* argv[])
 		}
 	#endif
 
+main_menu:
 	//Present the user with the welcome screen
 	if (welcome_screen() == -1)
 		return 0;
-	
+
+re_entry:
 	init_snake(flevel);
 	display();
 
@@ -238,7 +240,7 @@ int main (int argc, char* argv[])
 				key_pressed[KEY_Q] = FALSE;
 				FLUSH;
 				cleanup_handler(0);
-				return 0;
+				welcome_screen();
 			}
 			if (key_pressed[KEY_P])
 			{
@@ -541,15 +543,31 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 	}
 	
 	//Collision and food detection
-	if (board[(*s)[0].y][(*s)[0].x] == SNAKE1_HEAD || board[(*s)[0].y][(*s)[0].x] == SNAKE1_BODY ||board[(*s)[0].y][(*s)[0].x] == SNAKE2_HEAD || board[(*s)[0].y][(*s)[0].x] == SNAKE2_BODY)
+	if (board[(*s)[0].y][(*s)[0].x] == SNAKE1_HEAD || board[(*s)[0].y][(*s)[0].x] == SNAKE1_BODY)
 	{
-		print_status((char*)"You got all tangled up!", strlen((char*)"You got all tangled up!"));
+		if (player == P1)
+			print_status((char*)"P1, you got all tangled up!", strlen((char*)"P1, you got all tangled up!"));
+		else
+			print_status((char*)"P2 lost, ran into P1!", strlen((char*)"P2 lost, ran into P1!"));
+		gameover = TRUE;
+		return;
+	}
+	else if (board[(*s)[0].y][(*s)[0].x] == SNAKE2_HEAD || board[(*s)[0].y][(*s)[0].x] == SNAKE2_BODY)
+	{
+		if (player == P2)
+			print_status((char*)"P2, you got all tangled up!", strlen((char*)"P2, you got all tangled up!"));
+		else
+			print_status((char*)"P1 lost, ran into P2!", strlen((char*)"P1 lost, ran into P2!"));
+		
 		gameover = TRUE;
 		return;
 	}
 	else if (board[(*s)[0].y][(*s)[0].x] == OBSTACLE)
 	{
-		print_status((char*)"Watch out for the walls!", strlen((char*)"Watch out for the walls!"));
+		if (player == P1)
+			print_status((char*)"P1 lost! Watch out for the walls yo!", strlen((char*)"P1 lost! Watch out for the walls yo!"));
+		else
+			print_status((char*)"P2 lost! Watch out for the walls yo!", strlen((char*)"P2 lost! Watch out for the walls yo!"));
 		//fprintf(stderr, "Player %d ran into %c at (%d, %d)\n", player, board[(*s)[0].y][(*s)[0].x], (*s)[0].y, (*s)[0].x);
 		gameover = TRUE;
 		return;
@@ -562,8 +580,12 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 		make_food();
 		print_scores();
 		
-		char msg[21];
-		sprintf(msg, "Ate food with value %d", global_food_value);
+		char msg[24];
+		if (player == P1)
+			sprintf(msg, "P1 ate food with value %d", global_food_value);
+		else
+			sprintf(msg, "P2 ate food with value %d", global_food_value);
+		
 		print_status(msg, sizeof(msg)/sizeof(char));
 	}
 	
@@ -726,84 +748,42 @@ int switch_back()
 
 int go_east()
 {
-	char tile_ahead;
-	switch (snake_2[0].dir)
-	{
-		case UP:
-			if (snake_2[0].y == 0)
-				tile_ahead = board[ROWS - 1][snake_2[0].x];
-			else
-				tile_ahead = board[snake_2[0].y - 1][snake_2[0].x];
-			break;
-		case DOWN:
-			if (snake_2[0].y == ROWS - 1)
-				tile_ahead = board[0][snake_2[0].x];
-			else
-				tile_ahead = board[snake_2[0].y + 1][snake_2[0].x];
-			break;
-		case LEFT:
-			if (snake_2[0].x == COLS - 1)
-				tile_ahead = board[snake_2[0].y][0];
-			else
-				tile_ahead = board[snake_2[0].y][snake_2[0].x - 1];
-			break;
-		case RIGHT:
-			if (snake_2[0].x == 0)
-				tile_ahead = board[snake_2[0].y][COLS - 1];
-			else
-				tile_ahead = board[snake_2[0].y][snake_2[0].x + 1];
-			break;
-	}
-	fprintf(stderr, "tile ahead: '%c'\n", tile_ahead);
-	
-	//for RIGHT
-	if (snake_2[0].dir == RIGHT && (tile_ahead == EMPTY_TILE || tile_ahead == FOOD))
+	//Is it possible to go east?
+	char east_tile;
+	if (snake_2[0].x == COLS - 1)
+		east_tile = board[snake_2[0].y][0];
+	else
+		east_tile = board[snake_2[0].y][snake_2[0].x + 1];
+	if (east_tile == EMPTY_TILE || east_tile == FOOD)
 		return RIGHT;
 	
+	//East didn't work, so go in the first available direction:
+	//UP
 	char next_tile;
+	if (snake_2[0].y == 0)
+		next_tile = board[ROWS - 1][snake_2[0].x];
+	else
+		next_tile = board[snake_2[0].y - 1][snake_2[0].x];
+	if (next_tile == EMPTY_TILE || next_tile == FOOD)
+		return UP;
 	
-	//for up:
-	if (tile_ahead != EMPTY_TILE && tile_ahead != FOOD)
-	{
-		if (snake_2[0].y == 0)
-			next_tile = board[ROWS - 1][snake_2[0].x];
-		else
-			next_tile = board[snake_2[0].y - 1][snake_2[0].x];
-		
-		fprintf(stderr, "UP next tile: '%c'\n", next_tile);
-		
-		if (next_tile == EMPTY_TILE || next_tile == FOOD)
-			return UP;
-	}
+	//DOWN
+	if (snake_2[0].y == ROWS - 1)
+		next_tile = board[0][snake_2[0].x];
+	else
+		next_tile = board[snake_2[0].y + 1][snake_2[0].x];
+	if (next_tile == EMPTY_TILE || next_tile == FOOD)
+		return DOWN;
 	
-	//for DOWN
-	if (tile_ahead != EMPTY_TILE && tile_ahead != FOOD)
-	{
-		if (snake_2[0].y == ROWS - 1)
-			next_tile = board[0][snake_2[0].x];
-		else
-			next_tile = board[snake_2[0].y - 1][snake_2[0].x];
-		
-		fprintf(stderr, "DOWN next tile: '%c'\n", next_tile);
-		
-		if (next_tile == EMPTY_TILE || next_tile == FOOD)
-			return DOWN;
-	}
-
-	//for LEFT
-	if (tile_ahead != EMPTY_TILE && tile_ahead != FOOD)
-	{
-		if (snake_2[0].x == COLS - 1)
-			next_tile = board[snake_2[0].y][0];
-		else
-			next_tile = board[snake_2[0].y][snake_2[0].x - 1];
-		
-		fprintf(stderr, "LEFT next tile: '%c'\n", next_tile);
-		
-		if (next_tile == EMPTY_TILE || next_tile == FOOD)
-			return LEFT;
-	}
+	//LEFT
+	if (snake_2[0].x == 0)
+		next_tile = board[snake_2[0].y][COLS - 1];
+	else
+		next_tile = board[snake_2[0].y][snake_2[0].x - 1];
+	if (next_tile == EMPTY_TILE || next_tile == FOOD)
+		return LEFT;
 	
+	//If all else fails, go right anyway
 	return RIGHT;
 }
 
