@@ -43,7 +43,12 @@ int key_pressed[6];
 volatile int key;
 volatile int key_received;
 volatile int key_wasd_received;
+volatile int key_uhjk_received;
 volatile int key_pressed[6];
+
+int pb_file;
+struct pb_ioctl_data pb_data;
+#include "../../user-modules/pb_driver/pb_ioctl.h"
 #endif
 
 #define NUM_KEYS 6
@@ -79,9 +84,9 @@ void cleanup_handler(int signum);
 #define SNAKE2_BODY 'b'
 #define EMPTY_TILE ' '
 #define OBSTACLE '%'
-#define FOOD '$'
+#define FOOD '@'
 
-#define CHECK_WINSIZE
+//#define CHECK_WINSIZE
 struct winsize w;
 
 struct snake_segment
@@ -119,13 +124,16 @@ int p1_score;
 int p2_score;
 
 int gameover;
-int paused;
+volatile int paused;
 
 void init_snake(FILE* file);
 void reorder_snake(snake_segment**, int, int);
 void display();
 void move_snake(snake_segment** s, int* len, int* score, int player);
 void make_food();
+
+int welcome_screen();
+int num_players;
 
 void print_scores();
 void print_status(const char* status, int len);
@@ -135,12 +143,25 @@ void print_red(char c) { printf("\033[1;31m%c\033[0m", c); }
 void print_beige(char c) { printf("\033[0;33m%c\033[0m", c); }
 void print_blue(char c) { printf("\033[1;34m%c\033[0m", c); }
 
+#define GO_EAST 0
+#define TURN_RIGHT 1
+#define GREEDY 2
+#define SWITCH_BACK 3
+int ai_algo;
+
+int go_east();
+
+//Switchback vars
+int switch_back();
+int obstacle_encountered;
+int prev_dir;
+
 int main (int argc, char* argv[])
 {
-	if (argc < 2)
+	if (argc < 3)
 	{
 		printf("Incorrect usage, must indicate level config file!\n");
-		printf("Usage: ./snake <level>.cfg [optional random seed]\n");
+		printf("Usage: ./snake <level>.cfg ai=[go_east,turn_right,greedy,switchback] [optional random seed]\n");
 		return 0;
 	}
 	
@@ -150,6 +171,31 @@ int main (int argc, char* argv[])
 		printf("Error: unable to open %s\n", argv[1]);
 		return 0;
 	}
+	if (strcmp(argv[2], (char*)"ai=go_east"))
+		ai_algo = GO_EAST;
+	else if (strcmp(argv[2], (char*)"ai=turn_right"))
+		ai_algo = TURN_RIGHT;
+	else if (strcmp(argv[2], (char*)"ai=greedy"))
+		ai_algo = GREEDY;
+	else if (strcmp(argv[2], (char*)"ai=switchback"))
+		ai_algo = SWITCH_BACK;
+	else
+	{
+		printf("Invalid AI option: %s\n", argv[2]);
+		return 0;
+	}
+	#ifdef FPGA
+		pb_file = open("/dev/pb_driver", O_RDWR);
+		if (pb_file == -1)
+		{
+			printf("Unable to open pb_driver\n");
+			return 0;
+		}
+	#endif
+
+	//Present the user with the welcome screen
+	if (welcome_screen() == -1)
+		return 0;
 	
 	init_snake(flevel);
 	display();
@@ -174,6 +220,7 @@ int main (int argc, char* argv[])
 
 	MOVE_CURSOR(0,0);
 	display();
+	
 	
 	struct timespec prev_time;
 	struct timespec current_time;
@@ -200,17 +247,37 @@ int main (int argc, char* argv[])
 			key_received = FALSE;
 		}
 
+		if (num_players == 1)
+		{
+			switch (ai_algo)
+			{
+				case GO_EAST:
+					snake_2[0].dir = go_east();
+					break;
+				case TURN_RIGHT:
+				case GREEDY:
+				case SWITCH_BACK:
+					snake_2[0].dir = switch_back();
+					break;
+				default:
+					snake_2[0].dir = switch_back();
+			}
+		}
+			
 		move_snake(&snake_1, &length_1, &p1_score, P1);
+		move_snake(&snake_2, &length_2, &p2_score, P2);
 		
 		FLUSH;
-
+		
 		clock_gettime(CLOCK_MONOTONIC, &current_time);
 		time_delta = (current_time.tv_sec - prev_time.tv_sec) * 1000000000 + (current_time.tv_nsec - prev_time.tv_nsec);
-
+		
 		sleep_time.tv_nsec = SLEEP_TIME;
 		sleep_time.tv_sec = 0;
 		while(nanosleep(&sleep_time, &sleep_time) == -1);
 	}
+	
+	
 	cleanup_handler(0);
 	//printf("Thanks for playing!\n");
 	return 0;
@@ -245,28 +312,28 @@ void init_snake(FILE* file)
 				board[fy][fx] = SNAKE1_HEAD;
 				snake_1[length_1].x = fx;
 				snake_1[length_1].y = fy;
-				snake_1[length_1].chr = 'A';
+				snake_1[length_1].chr = SNAKE1_HEAD;
 				length_1++;
 				break;
 			case 'a':
 				board[fy][fx] = SNAKE1_BODY;
 				snake_1[length_1].x = fx;
 				snake_1[length_1].y = fy;
-				snake_1[length_1].chr = 'a';
+				snake_1[length_1].chr = SNAKE1_BODY;
 				length_1++;
 				break;
 			case 'B':
 				board[fy][fx] = SNAKE2_HEAD;
 				snake_2[length_2].x = fx;
 				snake_2[length_2].y = fy;
-				snake_2[length_2].chr = 'B';
+				snake_2[length_2].chr = SNAKE2_HEAD;
 				length_2++;
 				break;
 			case 'b':
 				board[fy][fx] = SNAKE2_BODY;
 				snake_2[length_2].x = fx;
 				snake_2[length_2].y = fy;
-				snake_2[length_2].chr = 'b';
+				snake_2[length_2].chr = SNAKE2_BODY;
 				length_2++;
 				break;
 			case '\n':
@@ -281,6 +348,11 @@ void init_snake(FILE* file)
 	
 	reorder_snake(&snake_1, length_1, 1);
 	reorder_snake(&snake_2, length_2, 2);
+	
+	//Setting switch back vars
+	obstacle_encountered = FALSE;
+	prev_dir = snake_2[0].dir;
+	
 	make_food();
 }
 
@@ -401,6 +473,8 @@ void display()
 	printf("\033[0m");
 }
 
+//Admitedly the code in this function is quite convoluted and difficult to under at first
+//because of the various pointers it uses...
 void move_snake(snake_segment** s, int* len, int* score, int player)
 {
 	/* Step for moving the snake
@@ -455,7 +529,7 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 			(*s)[0].dir = LEFT;
 			break;
 		case RIGHT:
-			if (snake_1[0].x == COLS - 1)
+			if ((*s)[0].x == COLS - 1)
 				(*s)[0].x = 0;
 			else
 				(*s)[0].x++;
@@ -467,7 +541,7 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 	}
 	
 	//Collision and food detection
-	if (board[(*s)[0].y][(*s)[0].x] == SNAKE1_BODY)
+	if (board[(*s)[0].y][(*s)[0].x] == SNAKE1_HEAD || board[(*s)[0].y][(*s)[0].x] == SNAKE1_BODY ||board[(*s)[0].y][(*s)[0].x] == SNAKE2_HEAD || board[(*s)[0].y][(*s)[0].x] == SNAKE2_BODY)
 	{
 		print_status((char*)"You got all tangled up!", strlen((char*)"You got all tangled up!"));
 		gameover = TRUE;
@@ -476,6 +550,7 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 	else if (board[(*s)[0].y][(*s)[0].x] == OBSTACLE)
 	{
 		print_status((char*)"Watch out for the walls!", strlen((char*)"Watch out for the walls!"));
+		//fprintf(stderr, "Player %d ran into %c at (%d, %d)\n", player, board[(*s)[0].y][(*s)[0].x], (*s)[0].y, (*s)[0].x);
 		gameover = TRUE;
 		return;
 	}
@@ -509,15 +584,227 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 		board[temp_head.y][temp_head.x] = SNAKE2_BODY;
 		
 		MOVE_CURSOR((*s)[0].y + 1, (*s)[0].x);
-		print_green(SNAKE2_HEAD);
+		print_blue(SNAKE2_HEAD);
 		MOVE_CURSOR(temp_head.y + 1, temp_head.x);
-		print_green(SNAKE2_BODY);
+		print_blue(SNAKE2_BODY);
 	}
 	board[temp_tail.y][temp_tail.x] = EMPTY_TILE;
 	
 	//Print an empty tile where the tail was
 	MOVE_CURSOR(temp_tail.y + 1, temp_tail.x);
 	print_beige(EMPTY_TILE);
+}
+
+int switch_back()
+{
+	if (obstacle_encountered == TRUE)
+	{
+		switch (prev_dir)
+		{
+			case UP:
+				obstacle_encountered = FALSE;
+				return DOWN;
+			case DOWN:
+				obstacle_encountered = FALSE;
+				return UP;
+			case LEFT:
+				obstacle_encountered = FALSE;
+				return RIGHT;
+			case RIGHT:
+				obstacle_encountered = FALSE;
+				return LEFT;
+			default:
+				return UP;
+		}
+	}
+	else
+	{
+		switch (snake_2[0].dir)
+		{
+			case UP:
+				if (board[snake_2[0].y - 1][snake_2[0].x] == OBSTACLE || 
+						board[snake_2[0].y - 1][snake_2[0].x] == SNAKE1_HEAD ||
+						board[snake_2[0].y - 1][snake_2[0].x] == SNAKE1_BODY)
+				{
+					obstacle_encountered = TRUE;
+					prev_dir = snake_2[0].dir;
+					if (board[snake_2[0].y][snake_2[0].x - 1] != OBSTACLE ||
+							board[snake_2[0].y][snake_2[0].x - 1] != SNAKE1_HEAD ||
+							board[snake_2[0].y][snake_2[0].x - 1] != SNAKE2_BODY)
+					{
+						return LEFT;
+					}
+					else if (board[snake_2[0].y][snake_2[0].x + 1] != OBSTACLE ||
+									 board[snake_2[0].y][snake_2[0].x + 1] != SNAKE1_HEAD ||
+									 board[snake_2[0].y][snake_2[0].x + 1] != SNAKE2_BODY)
+					{
+						return RIGHT;
+					}
+					else
+						return LEFT;
+							
+				}
+				else
+					return snake_2[0].dir;
+			case DOWN:
+				if (board[snake_2[0].y + 1][snake_2[0].x] == OBSTACLE || 
+						board[snake_2[0].y + 1][snake_2[0].x] == SNAKE1_HEAD ||
+						board[snake_2[0].y + 1][snake_2[0].x] == SNAKE1_BODY)
+				{
+					obstacle_encountered = TRUE;
+					prev_dir = snake_2[0].dir;
+					if (board[snake_2[0].y][snake_2[0].x - 1] != OBSTACLE ||
+							board[snake_2[0].y][snake_2[0].x - 1] != SNAKE1_HEAD ||
+							board[snake_2[0].y][snake_2[0].x - 1] != SNAKE1_BODY)
+					{
+						return LEFT;
+					}
+					else if (board[snake_2[0].y][snake_2[0].x + 1] != OBSTACLE ||
+									 board[snake_2[0].y][snake_2[0].x + 1] != SNAKE1_HEAD ||
+									 board[snake_2[0].y][snake_2[0].x + 1] != SNAKE1_BODY)
+					{
+						return RIGHT;
+					}
+					else
+						return LEFT;
+				}
+				else
+					return snake_2[0].dir;
+			case LEFT:
+				if (board[snake_2[0].y][snake_2[0].x - 1] == OBSTACLE || 
+						board[snake_2[0].y][snake_2[0].x - 1] == SNAKE1_HEAD ||
+						board[snake_2[0].y][snake_2[0].x - 1] == SNAKE1_BODY)
+				{
+					obstacle_encountered = TRUE;
+					prev_dir = snake_2[0].dir;
+					if (board[snake_2[0].y - 1][snake_2[0].x] != OBSTACLE ||
+							board[snake_2[0].y - 1][snake_2[0].x] != SNAKE1_HEAD ||
+							board[snake_2[0].y - 1][snake_2[0].x] != SNAKE1_BODY)
+					{
+						return DOWN;
+					}
+					else if (board[snake_2[0].y + 1][snake_2[0].x] != OBSTACLE ||
+									 board[snake_2[0].y + 1][snake_2[0].x] != SNAKE1_HEAD ||
+									 board[snake_2[0].y + 1][snake_2[0].x] != SNAKE1_BODY)
+					{
+						return UP;
+					}
+					else
+						return DOWN;
+				}
+				else
+					return snake_2[0].dir;
+			case RIGHT:
+				if (board[snake_2[0].y][snake_2[0].x + 1] == OBSTACLE || 
+						board[snake_2[0].y][snake_2[0].x + 1] == SNAKE1_HEAD ||
+						board[snake_2[0].y][snake_2[0].x + 1] == SNAKE1_BODY)
+				{
+					obstacle_encountered = TRUE;
+					prev_dir = snake_2[0].dir;
+					if (board[snake_2[0].y - 1][snake_2[0].x] != OBSTACLE ||
+							board[snake_2[0].y - 1][snake_2[0].x] != SNAKE1_HEAD ||
+							board[snake_2[0].y - 1][snake_2[0].x] != SNAKE1_BODY)
+					{
+						return DOWN;
+					}
+					else if (board[snake_2[0].y + 1][snake_2[0].x] != OBSTACLE ||
+									 board[snake_2[0].y + 1][snake_2[0].x] != SNAKE1_HEAD ||
+									 board[snake_2[0].y + 1][snake_2[0].x] != SNAKE1_BODY)
+					{
+						return UP;
+					}
+					else
+						return DOWN;
+				}
+				else
+					return snake_2[0].dir;
+			default:
+				return snake_2[0].dir;
+		}
+	}	
+}
+
+int go_east()
+{
+	char tile_ahead;
+	switch (snake_2[0].dir)
+	{
+		case UP:
+			if (snake_2[0].y == 0)
+				tile_ahead = board[ROWS - 1][snake_2[0].x];
+			else
+				tile_ahead = board[snake_2[0].y - 1][snake_2[0].x];
+			break;
+		case DOWN:
+			if (snake_2[0].y == ROWS - 1)
+				tile_ahead = board[0][snake_2[0].x];
+			else
+				tile_ahead = board[snake_2[0].y + 1][snake_2[0].x];
+			break;
+		case LEFT:
+			if (snake_2[0].x == COLS - 1)
+				tile_ahead = board[snake_2[0].y][0];
+			else
+				tile_ahead = board[snake_2[0].y][snake_2[0].x - 1];
+			break;
+		case RIGHT:
+			if (snake_2[0].x == 0)
+				tile_ahead = board[snake_2[0].y][COLS - 1];
+			else
+				tile_ahead = board[snake_2[0].y][snake_2[0].x + 1];
+			break;
+	}
+	fprintf(stderr, "tile ahead: '%c'\n", tile_ahead);
+	
+	//for RIGHT
+	if (snake_2[0].dir == RIGHT && (tile_ahead == EMPTY_TILE || tile_ahead == FOOD))
+		return RIGHT;
+	
+	char next_tile;
+	
+	//for up:
+	if (tile_ahead != EMPTY_TILE && tile_ahead != FOOD)
+	{
+		if (snake_2[0].y == 0)
+			next_tile = board[ROWS - 1][snake_2[0].x];
+		else
+			next_tile = board[snake_2[0].y - 1][snake_2[0].x];
+		
+		fprintf(stderr, "UP next tile: '%c'\n", next_tile);
+		
+		if (next_tile == EMPTY_TILE || next_tile == FOOD)
+			return UP;
+	}
+	
+	//for DOWN
+	if (tile_ahead != EMPTY_TILE && tile_ahead != FOOD)
+	{
+		if (snake_2[0].y == ROWS - 1)
+			next_tile = board[0][snake_2[0].x];
+		else
+			next_tile = board[snake_2[0].y - 1][snake_2[0].x];
+		
+		fprintf(stderr, "DOWN next tile: '%c'\n", next_tile);
+		
+		if (next_tile == EMPTY_TILE || next_tile == FOOD)
+			return DOWN;
+	}
+
+	//for LEFT
+	if (tile_ahead != EMPTY_TILE && tile_ahead != FOOD)
+	{
+		if (snake_2[0].x == COLS - 1)
+			next_tile = board[snake_2[0].y][0];
+		else
+			next_tile = board[snake_2[0].y][snake_2[0].x - 1];
+		
+		fprintf(stderr, "LEFT next tile: '%c'\n", next_tile);
+		
+		if (next_tile == EMPTY_TILE || next_tile == FOOD)
+			return LEFT;
+	}
+	
+	return RIGHT;
 }
 
 void make_food()
@@ -539,22 +826,22 @@ void make_food()
 	switch (global_food_value)
 	{
 		case 1:
-			printf("\033[1;31m@\033[0m"); //red
+			printf("\033[1;31m%c\033[0m", FOOD); //red
 			break;
 		case 2:
-			printf("\033[1;35m@\033[0m"); //purple
+			printf("\033[1;35m%c\033[0m", FOOD); //purple
 			break;
 		case 3:
-			printf("\033[1;34m@\033[0m"); //blue
+			printf("\033[1;34m%c\033[0m", FOOD); //blue
 			break;
 		case 4:
-			printf("\033[1;36m@\033[0m"); //cyan
+			printf("\033[1;36m%c\033[0m", FOOD); //cyan
 			break;
 		case 5:
-			printf("\033[1;34m@\033[0m"); //green
+			printf("\033[1;34m%c\033[0m", FOOD); //green
 			break;
 		default:
-			printf("\033[1;31m@\033[0m"); //red
+			printf("\033[1;31m%c\033[0m", FOOD); //red
 	}
 
 	return;
@@ -588,8 +875,37 @@ void print_status(const char* status, int len)
 	MOVE_CURSOR(1, 0);
 }
 
+int welcome_screen()
+{
+	char user_choice;
+
+	printf("Make your choice...\n1 - Single Player\n2 - Two Players\nq - Quit\n");	
+	do
+	{
+		user_choice = getchar();
+		 
+		if (user_choice == '1')
+			num_players = 1;
+		else if (user_choice == '2')
+			num_players = 2;
+		else if (user_choice == 'q' || user_choice == 'Q')
+		{
+			printf("See ya...\n");
+			return -1;
+		}
+		else
+			printf("Error: Invalid choice - '%c'(%d)\n", user_choice, user_choice);
+	} while (user_choice != '1' && user_choice != '2' && user_choice != 'q');
+
+	return 0;
+}
+
 void init_term()
 {
+	#ifdef FPGA
+		pb_data.offset = 0;
+	#endif
+	
 	gameover = FALSE;
 	paused = FALSE;
 	CLEAR_SCREEN;
@@ -611,61 +927,175 @@ void init_term()
 
 void keyboard_handler(int signum)
 {
-	key = getchar();
-	key_received = TRUE;
+	#ifndef FPGA
+		key = getchar();
+		key_received = TRUE;
+		
+		//Buffer latest direction and control keys
+		switch (key) 
+		{
+			case 'w':
+				key_pressed[KEY_WASD] = NORTH;
+				key_wasd_received = TRUE;
+				if (snake_1[0].dir != DOWN)
+					snake_1[0].dir = UP;
+				break;
+			case 's':
+				key_pressed[KEY_WASD] = SOUTH;
+				key_wasd_received = TRUE;
+				if (snake_1[0].dir != UP)
+					snake_1[0].dir = DOWN;
+				break;
+			case 'a':
+				key_pressed[KEY_WASD] = WEST;
+				key_wasd_received = TRUE;
+				if (snake_1[0].dir != RIGHT)		
+					snake_1[0].dir = LEFT;
+				break;
+			case 'd':
+				key_pressed[KEY_WASD] = EAST;
+				key_wasd_received = TRUE;
+				if (snake_1[0].dir != LEFT)
+					snake_1[0].dir = RIGHT;
+				break;
+			case 'u':
+				if (num_players == 1)
+					break;
+				if (snake_2[0].dir != DOWN)
+					snake_2[0].dir = UP;
+				break;
+			case 'j':
+				if (num_players == 1)
+					break;
+				if (snake_2[0].dir != UP)
+					snake_2[0].dir = DOWN;
+				break;
+			case 'h':
+				if (num_players == 1)
+					break;
+				if (snake_2[0].dir != RIGHT)
+					snake_2[0].dir = LEFT;
+				break;
+			case 'k':
+				if (num_players == 1)
+					break;
+				if (snake_2[0].dir != LEFT)
+					snake_2[0].dir = RIGHT;
+				break;
+			case 'q':
+			case 'Q':
+				key_pressed[KEY_Q] = TRUE;
+				break;
+			case 'p':
+			case 'P':
+				key_pressed[KEY_P] = TRUE;
+				paused = paused ? FALSE : TRUE; //toggle pause boolean
+				break;
+			case '\n':
+				key_pressed[KEY_ENTER] = TRUE;
+				break;
+			case '1':
+				key_pressed[KEY_AI_1] = TRUE;
+				break;
+			case '2':
+				key_pressed[KEY_AI_2] = TRUE;
+				break;
+			default:
+				break;
+		}
+	#endif
+	#ifdef FPGA
+		ioctl(pb_file,  PB_READ_REG, &pb_data);
+		key = getchar();
+		key_received = TRUE;
+		
+		//Evaluate the pushbutton input
+		switch(pb_data.data)
+		{
+			case 0x4: //UP
+				key_pressed[KEY_WASD] = NORTH;
+				key_wasd_received = TRUE;
+				if (snake_1[0].dir != DOWN)
+					snake_1[0].dir = UP;
+				break;
+			case 0x10: //DOWN
+				key_pressed[KEY_WASD] = SOUTH;
+				key_wasd_received = TRUE;
+				if (snake_1[0].dir != UP)
+					snake_1[0].dir = DOWN;
+				break;
+			case 0x2: //LEFT
+				key_pressed[KEY_WASD] = WEST;
+				key_wasd_received = TRUE;
+				if (snake_1[0].dir != RIGHT)		
+					snake_1[0].dir = LEFT;
+				break;
+			case 0x8: //RIGHT
+				key_pressed[KEY_WASD] = EAST;
+				key_wasd_received = TRUE;
+				if (snake_1[0].dir != LEFT)
+					snake_1[0].dir = RIGHT;
+				break;
+			case 'u':
+				if (num_players == 1)
+					break;
+				if (snake_2[0].dir != DOWN)
+					snake_2[0].dir = UP;
+				break;
+			case 'j':
+				if (num_players == 1)
+					break;
+				if (snake_2[0].dir != UP)
+					snake_2[0].dir = DOWN;
+				break;
+			case 'h':
+				if (num_players == 1)
+					break;
+				if (snake_2[0].dir != RIGHT)
+					snake_2[0].dir = LEFT;
+				break;
+			case 'k':
+				if (num_players == 1)
+					break;
+				if (snake_2[0].dir != LEFT)
+					snake_2[0].dir = RIGHT;
+				break;
+		}
 
-	//Buffer latest direction and control keys
-	switch (key) 
-	{
-		case 'w':
-			key_pressed[KEY_WASD] = NORTH;
-			key_wasd_received = TRUE;
-			if (snake_1[0].dir != DOWN)
-				snake_1[0].dir = UP;
-			break;
-		case 's':
-			key_pressed[KEY_WASD] = SOUTH;
-			key_wasd_received = TRUE;
-			if (snake_1[0].dir != UP)
-				snake_1[0].dir = DOWN;
-			break;
-		case SNAKE1_BODY:
-			key_pressed[KEY_WASD] = WEST;
-			key_wasd_received = TRUE;
-			if (snake_1[0].dir != RIGHT)		
-				snake_1[0].dir = LEFT;
-			break;
-		case 'd':
-			key_pressed[KEY_WASD] = EAST;
-			key_wasd_received = TRUE;
-			if (snake_1[0].dir != LEFT)
-				snake_1[0].dir = RIGHT;
-			break;
-		case 'q':
-		case 'Q':
-			key_pressed[KEY_Q] = TRUE;
-			break;
-		case 'p':
-		case 'P':
-			key_pressed[KEY_P] = TRUE;
-			paused = paused ? FALSE : TRUE; //toggle pause boolean
-			break;
-		case '\n':
-			key_pressed[KEY_ENTER] = TRUE;
-			break;
-		case '1':
-			key_pressed[KEY_AI_1] = TRUE;
-			break;
-		case '2':
-			key_pressed[KEY_AI_2] = TRUE;
-			break;
-		default:
-			break;
-	}
+		//Evaluate quit and pause controls
+		switch(key)
+		{
+			case 'q':
+			case 'Q':
+				key_pressed[KEY_Q] = TRUE;
+				break;
+			case 'p':
+			case 'P':
+				key_pressed[KEY_P] = TRUE;
+				paused = paused ? FALSE : TRUE; //toggle pause boolean
+				break;
+			case '\n':
+				key_pressed[KEY_ENTER] = TRUE;
+				break;
+			case '1':
+				key_pressed[KEY_AI_1] = TRUE;
+				break;
+			case '2':
+				key_pressed[KEY_AI_2] = TRUE;
+				break;
+			default:
+				break;
+		}
+	#endif
 }
 
 void cleanup_handler(int signum)
 {
+	//Close the pb_driver
+	#ifdef FPGA
+		close(pb_file);
+	#endif
+	
 	int row = 0;
 	SET_BG_COLOR(WHITE);
 	SET_FG_COLOR(BLACK);
