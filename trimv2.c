@@ -629,6 +629,9 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 
 int switch_back()
 {
+	char next_tile;
+	char lr_tile;
+	
 	if (obstacle_encountered == TRUE)
 	{
 		obstacle_encountered = FALSE;
@@ -651,10 +654,12 @@ int switch_back()
 		switch (snake_2[0].dir)
 		{
 			case UP:
-				if (board[snake_2[0].y - 1][snake_2[0].x] != EMPTY_TILE)
+				next_tile = board[(snake_2[0].y == 0 ? ROWS - 1 : snake_2[0].y - 1)][snake_2[0].x];
+				if (next_tile != EMPTY_TILE)
 				{
 					obstacle_encountered = TRUE;
 					prev_dir = snake_2[0].dir;
+					
 					if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x - 1] == FOOD)
 						return LEFT;
 					else if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x + 1] == FOOD)
@@ -665,7 +670,8 @@ int switch_back()
 				else
 					return snake_2[0].dir;
 			case DOWN:
-				if (board[snake_2[0].y + 1][snake_2[0].x] != EMPTY_TILE)
+				next_tile = board[(snake_2[0].y == ROWS - 1 ? 0 : snake_2[0].y + 1)][snake_2[0].x];
+				if (next_tile != EMPTY_TILE)
 				{
 					obstacle_encountered = TRUE;
 					prev_dir = snake_2[0].dir;
@@ -679,8 +685,8 @@ int switch_back()
 				else
 					return snake_2[0].dir;
 			case LEFT:
-				//fprintf(stderr, "going left\n");
-				if (board[snake_2[0].y][snake_2[0].x - 1] != EMPTY_TILE)
+				next_tile = board[snake_2[0].y][(snake_2[0].x == 0 ? COLS - 1 : snake_2[0].x - 1)];
+				if (next_tile != EMPTY_TILE)
 				{
 					obstacle_encountered = TRUE;
 					prev_dir = snake_2[0].dir;
@@ -694,7 +700,8 @@ int switch_back()
 				else
 					return snake_2[0].dir;
 			case RIGHT:
-				if (board[snake_2[0].y][snake_2[0].x + 1] != EMPTY_TILE)
+				next_tile = board[snake_2[0].y][(snake_2[0].x == COLS - 1 ? 0 : snake_2[0].x + 1)];
+				if (next_tile != EMPTY_TILE)
 				{
 					obstacle_encountered = TRUE;
 					prev_dir = snake_2[0].dir;
