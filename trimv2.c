@@ -43,7 +43,6 @@ int key_pressed[6];
 volatile int key;
 volatile int key_received;
 volatile int key_wasd_received;
-volatile int key_uhjk_received;
 volatile int key_pressed[6];
 
 int pb_file;
@@ -119,6 +118,8 @@ int length_2;
 int X_COORD;
 int Y_COORD;
 int global_food_value;
+int global_food_x;
+int global_food_y;
 
 int p1_score;
 int p2_score;
@@ -150,7 +151,8 @@ void print_blue(char c) { printf("\033[1;34m%c\033[0m", c); }
 int ai_algo;
 
 int go_east();
-
+int greedy();
+int detour;
 //Switchback vars
 int switch_back();
 int obstacle_encountered;
@@ -171,13 +173,14 @@ int main (int argc, char* argv[])
 		printf("Error: unable to open %s\n", argv[1]);
 		return 0;
 	}
-	if (strcmp(argv[2], (char*)"ai=go_east"))
+	
+	if (strcmp(argv[2], (char*)"ai=go_east") == 0)
 		ai_algo = GO_EAST;
-	else if (strcmp(argv[2], (char*)"ai=turn_right"))
+	else if (strcmp(argv[2], (char*)"ai=turn_right") == 0)
 		ai_algo = TURN_RIGHT;
-	else if (strcmp(argv[2], (char*)"ai=greedy"))
+	else if (strcmp(argv[2], (char*)"ai=greedy") == 0)
 		ai_algo = GREEDY;
-	else if (strcmp(argv[2], (char*)"ai=switchback"))
+	else if (strcmp(argv[2], (char*)"ai=switchback") == 0)
 		ai_algo = SWITCH_BACK;
 	else
 	{
@@ -263,6 +266,8 @@ re_entry:
 					break;
 				case TURN_RIGHT:
 				case GREEDY:
+					snake_2[0].dir = greedy();
+					break;
 				case SWITCH_BACK:
 					snake_2[0].dir = switch_back();
 					break;
@@ -626,19 +631,16 @@ int switch_back()
 {
 	if (obstacle_encountered == TRUE)
 	{
+		obstacle_encountered = FALSE;
 		switch (prev_dir)
 		{
 			case UP:
-				obstacle_encountered = FALSE;
 				return DOWN;
 			case DOWN:
-				obstacle_encountered = FALSE;
 				return UP;
 			case LEFT:
-				obstacle_encountered = FALSE;
 				return RIGHT;
 			case RIGHT:
-				obstacle_encountered = FALSE;
 				return LEFT;
 			default:
 				return UP;
@@ -649,97 +651,57 @@ int switch_back()
 		switch (snake_2[0].dir)
 		{
 			case UP:
-				if (board[snake_2[0].y - 1][snake_2[0].x] == OBSTACLE || 
-						board[snake_2[0].y - 1][snake_2[0].x] == SNAKE1_HEAD ||
-						board[snake_2[0].y - 1][snake_2[0].x] == SNAKE1_BODY)
+				if (board[snake_2[0].y - 1][snake_2[0].x] != EMPTY_TILE)
 				{
 					obstacle_encountered = TRUE;
 					prev_dir = snake_2[0].dir;
-					if (board[snake_2[0].y][snake_2[0].x - 1] != OBSTACLE ||
-							board[snake_2[0].y][snake_2[0].x - 1] != SNAKE1_HEAD ||
-							board[snake_2[0].y][snake_2[0].x - 1] != SNAKE2_BODY)
-					{
+					if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x - 1] == FOOD)
 						return LEFT;
-					}
-					else if (board[snake_2[0].y][snake_2[0].x + 1] != OBSTACLE ||
-									 board[snake_2[0].y][snake_2[0].x + 1] != SNAKE1_HEAD ||
-									 board[snake_2[0].y][snake_2[0].x + 1] != SNAKE2_BODY)
-					{
+					else if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x + 1] == FOOD)
 						return RIGHT;
-					}
 					else
-						return LEFT;
-							
+						return LEFT;		
 				}
 				else
 					return snake_2[0].dir;
 			case DOWN:
-				if (board[snake_2[0].y + 1][snake_2[0].x] == OBSTACLE || 
-						board[snake_2[0].y + 1][snake_2[0].x] == SNAKE1_HEAD ||
-						board[snake_2[0].y + 1][snake_2[0].x] == SNAKE1_BODY)
+				if (board[snake_2[0].y + 1][snake_2[0].x] != EMPTY_TILE)
 				{
 					obstacle_encountered = TRUE;
 					prev_dir = snake_2[0].dir;
-					if (board[snake_2[0].y][snake_2[0].x - 1] != OBSTACLE ||
-							board[snake_2[0].y][snake_2[0].x - 1] != SNAKE1_HEAD ||
-							board[snake_2[0].y][snake_2[0].x - 1] != SNAKE1_BODY)
-					{
+					if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x - 1] == FOOD)
 						return LEFT;
-					}
-					else if (board[snake_2[0].y][snake_2[0].x + 1] != OBSTACLE ||
-									 board[snake_2[0].y][snake_2[0].x + 1] != SNAKE1_HEAD ||
-									 board[snake_2[0].y][snake_2[0].x + 1] != SNAKE1_BODY)
-					{
+					else if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x + 1] == FOOD)
 						return RIGHT;
-					}
 					else
 						return LEFT;
 				}
 				else
 					return snake_2[0].dir;
 			case LEFT:
-				if (board[snake_2[0].y][snake_2[0].x - 1] == OBSTACLE || 
-						board[snake_2[0].y][snake_2[0].x - 1] == SNAKE1_HEAD ||
-						board[snake_2[0].y][snake_2[0].x - 1] == SNAKE1_BODY)
+				//fprintf(stderr, "going left\n");
+				if (board[snake_2[0].y][snake_2[0].x - 1] != EMPTY_TILE)
 				{
 					obstacle_encountered = TRUE;
 					prev_dir = snake_2[0].dir;
-					if (board[snake_2[0].y - 1][snake_2[0].x] != OBSTACLE ||
-							board[snake_2[0].y - 1][snake_2[0].x] != SNAKE1_HEAD ||
-							board[snake_2[0].y - 1][snake_2[0].x] != SNAKE1_BODY)
-					{
+					if (board[snake_2[0].y - 1][snake_2[0].x] == EMPTY_TILE || board[snake_2[0].y - 1][snake_2[0].x] == FOOD)
 						return DOWN;
-					}
-					else if (board[snake_2[0].y + 1][snake_2[0].x] != OBSTACLE ||
-									 board[snake_2[0].y + 1][snake_2[0].x] != SNAKE1_HEAD ||
-									 board[snake_2[0].y + 1][snake_2[0].x] != SNAKE1_BODY)
-					{
+					else if (board[snake_2[0].y + 1][snake_2[0].x] == EMPTY_TILE || board[snake_2[0].y + 1][snake_2[0].x] == FOOD)
 						return UP;
-					}
 					else
 						return DOWN;
 				}
 				else
 					return snake_2[0].dir;
 			case RIGHT:
-				if (board[snake_2[0].y][snake_2[0].x + 1] == OBSTACLE || 
-						board[snake_2[0].y][snake_2[0].x + 1] == SNAKE1_HEAD ||
-						board[snake_2[0].y][snake_2[0].x + 1] == SNAKE1_BODY)
+				if (board[snake_2[0].y][snake_2[0].x + 1] != EMPTY_TILE)
 				{
 					obstacle_encountered = TRUE;
 					prev_dir = snake_2[0].dir;
-					if (board[snake_2[0].y - 1][snake_2[0].x] != OBSTACLE ||
-							board[snake_2[0].y - 1][snake_2[0].x] != SNAKE1_HEAD ||
-							board[snake_2[0].y - 1][snake_2[0].x] != SNAKE1_BODY)
-					{
-						return DOWN;
-					}
-					else if (board[snake_2[0].y + 1][snake_2[0].x] != OBSTACLE ||
-									 board[snake_2[0].y + 1][snake_2[0].x] != SNAKE1_HEAD ||
-									 board[snake_2[0].y + 1][snake_2[0].x] != SNAKE1_BODY)
-					{
+					if (board[snake_2[0].y - 1][snake_2[0].x] == EMPTY_TILE || board[snake_2[0].y - 1][snake_2[0].x] == FOOD)
 						return UP;
-					}
+					else if (board[snake_2[0].y + 1][snake_2[0].x] == EMPTY_TILE || board[snake_2[0].y + 1][snake_2[0].x] == FOOD)
+						return DOWN;
 					else
 						return DOWN;
 				}
@@ -760,7 +722,10 @@ int go_east()
 	else
 		east_tile = board[snake_2[0].y][snake_2[0].x + 1];
 	if (east_tile == EMPTY_TILE || east_tile == FOOD)
+	{
+		fprintf(stderr, "return east\n");
 		return RIGHT;
+	}
 	
 	//East didn't work, so go in the first available direction:
 	//UP
@@ -769,6 +734,7 @@ int go_east()
 		next_tile = board[ROWS - 1][snake_2[0].x];
 	else
 		next_tile = board[snake_2[0].y - 1][snake_2[0].x];
+	fprintf(stderr, "UP next tile: '%c'\n", next_tile);
 	if (next_tile == EMPTY_TILE || next_tile == FOOD)
 		return UP;
 	
@@ -777,6 +743,7 @@ int go_east()
 		next_tile = board[0][snake_2[0].x];
 	else
 		next_tile = board[snake_2[0].y + 1][snake_2[0].x];
+	fprintf(stderr, "DOWN next tile: '%c'\n", next_tile);
 	if (next_tile == EMPTY_TILE || next_tile == FOOD)
 		return DOWN;
 	
@@ -785,11 +752,111 @@ int go_east()
 		next_tile = board[snake_2[0].y][COLS - 1];
 	else
 		next_tile = board[snake_2[0].y][snake_2[0].x - 1];
+	fprintf(stderr, "LEFT next tile: '%c'\n", next_tile);
 	if (next_tile == EMPTY_TILE || next_tile == FOOD)
 		return LEFT;
 	
 	//If all else fails, go right anyway
 	return RIGHT;
+}
+
+int greedy()
+{
+	if (detour == TRUE)
+	{
+		detour = FALSE;
+		switch (prev_dir)
+		{
+			case UP:
+				return DOWN;
+			case DOWN:
+				return UP;
+			case LEFT:
+				return RIGHT;
+			case RIGHT:
+				return LEFT;
+			default:
+				return UP;
+		}
+	}
+	
+	if (global_food_y < snake_2[0].y)
+	{
+		if (snake_2[0].dir == DOWN)
+		{
+			detour = TRUE;
+			if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE)
+			{
+				prev_dir == DOWN;
+				return LEFT;
+			}
+			else if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE)
+			{
+				prev_dir = DOWN;
+				return RIGHT;
+			}
+		}
+		else
+			return UP;
+	}
+	else if (global_food_y > snake_2[0].y)
+	{
+		if (snake_2[0].dir == UP)
+		{
+			detour = TRUE;
+			if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE)
+			{
+				prev_dir == UP;
+				return LEFT;
+			}
+			else if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE)
+			{
+				prev_dir = UP;
+				return RIGHT;
+			}
+		}
+		else
+			return DOWN;
+	}
+	
+	if (global_food_x > snake_2[0].x)
+	{
+		if (snake_2[0].dir == LEFT)
+		{
+			detour = TRUE;
+			if (board[snake_2[0].y - 1][snake_2[0].x] == EMPTY_TILE)
+			{
+				prev_dir = LEFT;
+				return UP;
+			}
+			else if (board[snake_2[0].y + 1][snake_2[0].x] == EMPTY_TILE)
+			{
+				prev_dir = LEFT;
+				return DOWN;
+			}
+		}
+		else
+			return RIGHT;
+	}
+	else if (global_food_x < snake_2[0].x)
+	{
+		if (snake_2[0].dir == RIGHT)
+		{
+			detour = TRUE;
+			if (board[snake_2[0].y - 1][snake_2[0].x] == EMPTY_TILE)
+			{
+				prev_dir = RIGHT;
+				return UP;
+			}
+			else if (board[snake_2[0].y + 1][snake_2[0].x] == EMPTY_TILE)
+			{
+				prev_dir = RIGHT;
+				return DOWN;
+			}
+		}
+		else
+			return LEFT;
+	}
 }
 
 void make_food()
@@ -801,9 +868,11 @@ void make_food()
 	{
 		x = rand() % COLS;
 		y = rand() % ROWS;
-	} while (board[y][x] == SNAKE1_HEAD || board[y][x] == SNAKE1_BODY || board[y][x] == OBSTACLE);
+	} while (board[y][x] != EMPTY_TILE);
 	
 	global_food_value = rand() % MAX_FOOD_VALUE + 1;
+	global_food_x = x;
+	global_food_y = y;
 	
 	board[y][x] = FOOD;
 	MOVE_CURSOR(y + 1, x);
