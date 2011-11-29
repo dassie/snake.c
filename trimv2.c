@@ -33,7 +33,7 @@ static const char BG[8][7] = {"\e[40m","\e[41m","\e[42m","\e[43m","\e[44m","\e[4
 #define LEAVE_LINE_MODE fputs("\e[B",stdout)
 #define DIAMOND_SYMBOL 96
 
-#define FPGA
+//#define FPGA
 #ifndef FPGA
 int key;
 int key_received;
@@ -112,6 +112,12 @@ snake_segment copy_seg(snake_segment* segment)
 
 #define P1 1
 #define P2 2
+#define AI 1
+#define HUMAN 2
+int num_players;
+int p1_mode;
+int p2_mode;
+
 
 char board[ROWS][COLS];
 snake_segment* snake_1;
@@ -140,7 +146,6 @@ void move_snake(snake_segment** s, int* len, int* score, int player);
 void make_food();
 
 int welcome_screen();
-int num_players;
 
 void print_scores();
 void print_status(const char* status, int len);
@@ -155,15 +160,17 @@ void print_blue(char c) { printf("\033[1;34m%c\033[0m", c); }
 #define GREEDY 2
 #define SWITCH_BACK 3
 int ai_algo;
+int call_ai(int current_dir, int x, int y, int* obs, int* prev_dir);
+int go_east(int current_dir, int x, int y, int* obs, int* prev_dir);
+int greedy(int current_dir, int x, int y, int* obs, int* prev_dir);
+int turn_right(int current_dir, int x, int y, int* obs, int* prev_dir);
+int switch_back(int current_dir, int x, int y, int* obs, int* prev_dir);
 
-int go_east();
-int greedy();
-int turn_right();
-int detour;
-//Switchback vars
-int switch_back();
-int obstacle_encountered;
-int prev_dir;
+//state variables
+int p1_obstacle_state;
+int p1_prev_state;
+int p2_obstacle_state;
+int p2_prev_state;
 
 //Initial stdin file flags
 int flags_stdin;
@@ -239,6 +246,8 @@ main_menu:
 	//Present the user with the welcome screen
 	if (welcome_screen() == -1)
 		return 0;
+	
+	fprintf(stderr, "Game mode: %d, Player 1: %s, Player 2: %s\n", num_players, (p1_mode == AI ? "AI" : "Human"), (p2_mode == AI ? "AI" : "Human"));
 
 re_entry:
 	init_snake(flevel);
@@ -286,36 +295,28 @@ re_entry:
 			key_received = FALSE;
 		}
 
-		if (num_players == 1)
-		{
-			switch (ai_algo)
-			{
-				case GO_EAST:
-					snake_2[0].dir = go_east();
-					break;
-				case TURN_RIGHT:
-					snake_2[0].dir = turn_right();
-					break;
-				case GREEDY:
-					snake_2[0].dir = greedy();
-					break;
-				case SWITCH_BACK:
-					snake_2[0].dir = switch_back();
-					break;
-				default:
-					snake_2[0].dir = switch_back();
-			}
-		}
-			
-		move_snake(&snake_1, &length_1, &p1_score, P1);
-		move_snake(&snake_2, &length_2, &p2_score, P2);
+		if (num_players == 1 && p1_mode == AI)
+			snake_1[0].dir = call_ai(snake_1[0].dir, snake_1[0].x, snake_1[0].y, &p1_obstacle_state, &p1_prev_state);
 		
+		else if (num_players == 2)
+		{
+			if (p1_mode == AI)
+				snake_1[0].dir = call_ai(snake_1[0].dir, snake_1[0].x, snake_1[0].y, &p1_obstacle_state, &p1_prev_state);
+
+			if (p2_mode == AI)
+				snake_2[0].dir = call_ai(snake_2[0].dir, snake_2[0].x, snake_2[0].y, &p2_obstacle_state, &p2_prev_state);
+		}
+		
+		move_snake(&snake_1, &length_1, &p1_score, P1);
+		
+		if (num_players == 2)
+			move_snake(&snake_2, &length_2, &p2_score, P2);
+
 		FLUSH;
 		
 		#ifdef FPGA
 			data.offset = LOAD_REG;
 			data.data = TIMER_DELAY;
-			//fprintf("Delay set to %x\n", TIMER_DELAY);
 			ioctl(timer_dev, TIMER_WRITE_REG, &data);
 			data.offset = CONTROL_REG;
 			data.data = 0x20; //Load the delay into the counter
@@ -323,12 +324,11 @@ re_entry:
 			data.data = 0x82; //Start the timer
 			ioctl(timer_dev, TIMER_WRITE_REG, &data);
 			
+			//Now poll it until it's reset to 0xFFFFFFFF
 			data.offset = TIMER_REG;
 			do
 			{
 				ioctl(timer_dev, TIMER_READ_REG, &data);
-				//fprintf(stderr, "Ticks left: %x\n", data.data);
-				//fflush(stderr);
 			} while (data.data != 0xFFFFFFFF);
 		#endif
 		#ifndef FPGA
@@ -391,18 +391,28 @@ void init_snake(FILE* file)
 				length_1++;
 				break;
 			case 'B':
-				board[fy][fx] = SNAKE2_HEAD;
-				snake_2[length_2].x = fx;
-				snake_2[length_2].y = fy;
-				snake_2[length_2].chr = SNAKE2_HEAD;
-				length_2++;
+				if (num_players == 2)
+				{
+					board[fy][fx] = SNAKE2_HEAD;
+					snake_2[length_2].x = fx;
+					snake_2[length_2].y = fy;
+					snake_2[length_2].chr = SNAKE2_HEAD;
+					length_2++;
+				}
+				else
+					board[fy][fx] = EMPTY_TILE;
 				break;
 			case 'b':
-				board[fy][fx] = SNAKE2_BODY;
-				snake_2[length_2].x = fx;
-				snake_2[length_2].y = fy;
-				snake_2[length_2].chr = SNAKE2_BODY;
-				length_2++;
+				if (num_players == 2)
+				{
+					board[fy][fx] = SNAKE2_BODY;
+					snake_2[length_2].x = fx;
+					snake_2[length_2].y = fy;
+					snake_2[length_2].chr = SNAKE2_BODY;
+					length_2++;
+				}
+				else
+					board[fx][fy] = EMPTY_TILE;
 				break;
 			case '\n':
 				fy++;
@@ -418,11 +428,12 @@ void init_snake(FILE* file)
 	fclose(file);
 	
 	reorder_snake(&snake_1, length_1, 1);
-	reorder_snake(&snake_2, length_2, 2);
+	
+	if (num_players == 2)
+		reorder_snake(&snake_2, length_2, 2);
 	
 	//Setting switch back vars
-	obstacle_encountered = FALSE;
-	prev_dir = snake_2[0].dir;
+	p1_prev_state = p2_prev_state = p1_obstacle_state = p2_obstacle_state = -1;
 	
 	make_food();
 }
@@ -556,9 +567,20 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 	 * NOTE: the board array must be updated at each step as well
 	 */
 	
+	snake_segment temp_head;
+	temp_head.chr = (*s)[0].chr;
+	temp_head.dir = (*s)[0].dir;
+	temp_head.x = (*s)[0].x;
+	temp_head.y = (*s)[0].y;
 	
-	snake_segment temp_head = copy_seg(&(*s)[0]);
-	snake_segment temp_tail = copy_seg(&(*s)[(*len) - 1]);
+	snake_segment temp_tail;
+	temp_tail.chr = (*s)[(*len) - 1].chr;
+	temp_tail.dir = (*s)[(*len) - 1].dir;
+	temp_tail.x = (*s)[(*len) - 1].x;
+	temp_tail.y = (*s)[(*len) - 1].y;
+	
+	//snake_segment temp_head = copy_seg(&(*s)[0]);
+	//snake_segment temp_tail = copy_seg(&(*s)[(*len) - 1]);
 	
 	//Update each segments direction and position
 	snake_segment t1 = (*s)[0];
@@ -714,15 +736,32 @@ void move_snake(snake_segment** s, int* len, int* score, int player)
 	print_beige(EMPTY_TILE);
 }
 
-int switch_back()
+int call_ai(int current_dir, int x, int y, int* obs, int* prev_dir)
+{
+	switch (ai_algo)
+	{
+		case GO_EAST:
+			return go_east(current_dir, x, y, NULL, NULL);
+		case TURN_RIGHT:
+			return turn_right(current_dir, x, y, NULL, NULL);
+		case GREEDY:
+			return greedy(current_dir, x, y, obs, prev_dir);
+		case SWITCH_BACK:
+			return switch_back(current_dir, x, y, obs, prev_dir);
+		default:
+			return switch_back(current_dir, x, y, obs, prev_dir);
+	}
+}
+
+int switch_back(int current_dir, int x, int y, int* obs, int* prev_dir)
 {
 	char next_tile;
 	char lr_tile;
 	
-	if (obstacle_encountered == TRUE)
+	if (*obs == TRUE)
 	{
-		obstacle_encountered = FALSE;
-		switch (prev_dir)
+		*obs = FALSE;
+		switch (*prev_dir)
 		{
 			case UP:
 				return DOWN;
@@ -738,111 +777,111 @@ int switch_back()
 	}
 	else
 	{
-		switch (snake_2[0].dir)
+		switch (current_dir)
 		{
 			case UP:
-				next_tile = board[(snake_2[0].y == 0 ? ROWS - 1 : snake_2[0].y - 1)][snake_2[0].x];
+				next_tile = board[(y == 0 ? ROWS - 1 : y - 1)][x];
 				if (next_tile != EMPTY_TILE && next_tile != FOOD)
 				{
-					obstacle_encountered = TRUE;
-					prev_dir = snake_2[0].dir;
+					*obs = TRUE;
+					*prev_dir = current_dir;
 					
-					if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x + 1] == FOOD)
+					if (board[y][x + 1] == EMPTY_TILE || board[y][x + 1] == FOOD)
 						return RIGHT;
-					if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x - 1] == FOOD)
+					if (board[y][x - 1] == EMPTY_TILE || board[y][x - 1] == FOOD)
 						return LEFT;
 					else
 						return LEFT;		
 				}
 				else
-					return snake_2[0].dir;
+					return current_dir;
 			case DOWN:
-				next_tile = board[(snake_2[0].y == ROWS - 1 ? 0 : snake_2[0].y + 1)][snake_2[0].x];
+				next_tile = board[(y == ROWS - 1 ? 0 : y + 1)][x];
 				if (next_tile != EMPTY_TILE && next_tile != FOOD)
 				{
-					obstacle_encountered = TRUE;
-					prev_dir = snake_2[0].dir;
+					*obs = TRUE;
+					*prev_dir = current_dir;
 					
-					if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x + 1] == FOOD)
+					if (board[y][x + 1] == EMPTY_TILE || board[y][x + 1] == FOOD)
 						return RIGHT;
-					if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE || board[snake_2[0].y][snake_2[0].x - 1] == FOOD)
+					if (board[y][x - 1] == EMPTY_TILE || board[y][x - 1] == FOOD)
 						return LEFT;
 					else
 						return LEFT;
 				}
 				else
-					return snake_2[0].dir;
+					return current_dir;
 			case LEFT:
-				next_tile = board[snake_2[0].y][(snake_2[0].x == 0 ? COLS - 1 : snake_2[0].x - 1)];
+				next_tile = board[y][(x == 0 ? COLS - 1 : x - 1)];
 				if (next_tile != EMPTY_TILE && next_tile != FOOD)
 				{
-					obstacle_encountered = TRUE;
-					prev_dir = snake_2[0].dir;
-					if (board[snake_2[0].y - 1][snake_2[0].x] == EMPTY_TILE || board[snake_2[0].y - 1][snake_2[0].x] == FOOD)
+					*obs = TRUE;
+					*prev_dir = current_dir;
+					if (board[y - 1][x] == EMPTY_TILE || board[y - 1][x] == FOOD)
 						return UP;
-					else if (board[snake_2[0].y + 1][snake_2[0].x] == EMPTY_TILE || board[snake_2[0].y + 1][snake_2[0].x] == FOOD)
+					else if (board[y + 1][x] == EMPTY_TILE || board[y + 1][x] == FOOD)
 						return DOWN;
 					else
 						return DOWN;
 				}
 				else
-					return snake_2[0].dir;
+					return current_dir;
 			case RIGHT:
-				next_tile = board[snake_2[0].y][(snake_2[0].x == COLS - 1 ? 0 : snake_2[0].x + 1)];
+				next_tile = board[y][(x == COLS - 1 ? 0 : x + 1)];
 				if (next_tile != EMPTY_TILE && next_tile != FOOD)
 				{
-					obstacle_encountered = TRUE;
-					prev_dir = snake_2[0].dir;
+					*obs = TRUE;
+					*prev_dir = current_dir;
 					
-					if (board[snake_2[0].y + 1][snake_2[0].x] == EMPTY_TILE || board[snake_2[0].y + 1][snake_2[0].x] == FOOD)
+					if (board[y + 1][x] == EMPTY_TILE || board[y + 1][x] == FOOD)
 						return DOWN;
-					if (board[snake_2[0].y - 1][snake_2[0].x] == EMPTY_TILE || board[snake_2[0].y - 1][snake_2[0].x] == FOOD)
+					if (board[y - 1][x] == EMPTY_TILE || board[y - 1][x] == FOOD)
 						return UP;
 					else
 						return DOWN;
 				}
 				else
-					return snake_2[0].dir;
+					return current_dir;
 			default:
-				return snake_2[0].dir;
+				return current_dir;
 		}
-	}	
+	}
 }
 
-int go_east()
+int go_east(int current_dir, int x, int y, int* obs, int* prev_dir)
 {
 	//Is it possible to go east?
 	char east_tile;
-	if (snake_2[0].x == COLS - 1)
-		east_tile = board[snake_2[0].y][0];
+	if (x == COLS - 1)
+		east_tile = board[y][0];
 	else
-		east_tile = board[snake_2[0].y][snake_2[0].x + 1];
+		east_tile = board[y][x + 1];
 	if (east_tile == EMPTY_TILE || east_tile == FOOD)
 		return RIGHT;
 	
 	//East didn't work, so go in the first available direction:
 	//UP
 	char next_tile;
-	if (snake_2[0].y == 0)
-		next_tile = board[ROWS - 1][snake_2[0].x];
+	if (y == 0)
+		next_tile = board[ROWS - 1][x];
 	else
-		next_tile = board[snake_2[0].y - 1][snake_2[0].x];
+		next_tile = board[y - 1][x];
 	if (next_tile == EMPTY_TILE || next_tile == FOOD)
 		return UP;
 	
 	//DOWN
-	if (snake_2[0].y == ROWS - 1)
-		next_tile = board[0][snake_2[0].x];
+	if (y == ROWS - 1)
+		next_tile = board[0][x];
 	else
-		next_tile = board[snake_2[0].y + 1][snake_2[0].x];
+		next_tile = board[y + 1][x];
 	if (next_tile == EMPTY_TILE || next_tile == FOOD)
 		return DOWN;
 	
 	//LEFT
-	if (snake_2[0].x == 0)
-		next_tile = board[snake_2[0].y][COLS - 1];
+	if (x == 0)
+		next_tile = board[y][COLS - 1];
 	else
-		next_tile = board[snake_2[0].y][snake_2[0].x - 1];
+		next_tile = board[y][x - 1];
 	if (next_tile == EMPTY_TILE || next_tile == FOOD)
 		return LEFT;
 	
@@ -850,15 +889,15 @@ int go_east()
 	return RIGHT;
 }
 
-int greedy()
+int greedy(int current_dir, int x, int y, int* obs, int* prev_dir)
 {
 	char next_tile;
 	int failed = 0;
 	
-	if (detour == TRUE)
+	if (*obs == TRUE)
 	{
-		detour = FALSE;
-		switch (prev_dir)
+		*obs = FALSE;
+		switch (*prev_dir)
 		{
 			case UP:
 				return DOWN;
@@ -873,47 +912,47 @@ int greedy()
 		}
 	}
 	
-	if (global_food_y < snake_2[0].y)
+	if (global_food_y < y)
 	{
 		
-		next_tile = board[(snake_2[0].y == 0 ? ROWS - 1 : snake_2[0].y - 1)][snake_2[0].x];;
+		next_tile = board[(y == 0 ? ROWS - 1 : y - 1)][x];;
 		if (next_tile != EMPTY_TILE)
 			failed++;
 			
-		if (snake_2[0].dir == DOWN)
+		if (current_dir == DOWN)
 		{
-			detour = TRUE;
-			if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE)
+			*obs = TRUE;
+			if (board[y][x - 1] == EMPTY_TILE)
 			{
-				prev_dir == DOWN;
+				*prev_dir == DOWN;
 				return LEFT;
 			}
-			else if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE)
+			else if (board[y][x + 1] == EMPTY_TILE)
 			{
-				prev_dir = DOWN;
+				*prev_dir = DOWN;
 				return RIGHT;
 			}
 		}
 		else
 			return UP;
 	}
-	else if (global_food_y > snake_2[0].y)
+	else if (global_food_y > y)
 	{
-		next_tile = board[(snake_2[0].y == ROWS - 1 ? 0 : snake_2[0].y + 1)][snake_2[0].x];
+		next_tile = board[(y == ROWS - 1 ? 0 : y + 1)][x];
 		if (next_tile != EMPTY_TILE)
 			failed++;
 			
-		if (snake_2[0].dir == UP)
+		if (current_dir == UP)
 		{
-			detour = TRUE;
-			if (board[snake_2[0].y][snake_2[0].x - 1] == EMPTY_TILE)
+			*obs = TRUE;
+			if (board[y][x - 1] == EMPTY_TILE)
 			{
-				prev_dir == UP;
+				*prev_dir == UP;
 				return LEFT;
 			}
-			else if (board[snake_2[0].y][snake_2[0].x + 1] == EMPTY_TILE)
+			else if (board[y][x + 1] == EMPTY_TILE)
 			{
-				prev_dir = UP;
+				*prev_dir = UP;
 				return RIGHT;
 			}
 		}
@@ -921,46 +960,46 @@ int greedy()
 			return DOWN;
 	}
 	
-	if (global_food_x > snake_2[0].x)
+	if (global_food_x > x)
 	{
-		next_tile = board[snake_2[0].y][(snake_2[0].x == COLS - 1 ? 0 : snake_2[0].x + 1)];
+		next_tile = board[y][(x == COLS - 1 ? 0 : x + 1)];
 		if (next_tile != EMPTY_TILE && failed >= 1)
-			return turn_right();
+			return turn_right(current_dir, x, y, obs, prev_dir);
 			
-		if (snake_2[0].dir == LEFT)
+		if (current_dir == LEFT)
 		{
-			detour = TRUE;
-			if (board[snake_2[0].y - 1][snake_2[0].x] == EMPTY_TILE)
+			*obs = TRUE;
+			if (board[y - 1][x] == EMPTY_TILE)
 			{
-				prev_dir = LEFT;
+				*prev_dir = LEFT;
 				return UP;
 			}
-			else if (board[snake_2[0].y + 1][snake_2[0].x] == EMPTY_TILE)
+			else if (board[y + 1][x] == EMPTY_TILE)
 			{
-				prev_dir = LEFT;
+				*prev_dir = LEFT;
 				return DOWN;
 			}
 		}
 		else
 			return RIGHT;
 	}
-	else if (global_food_x < snake_2[0].x)
+	else if (global_food_x < x)
 	{
-		next_tile = board[snake_2[0].y][(snake_2[0].x == 0 ? COLS - 1 : snake_2[0].x + 1)];
+		next_tile = board[y][(x == 0 ? COLS - 1 : x + 1)];
 		if (next_tile != EMPTY_TILE && failed >= 1)
-				return turn_right();
+				return turn_right(current_dir, x, y, obs, prev_dir);
 				
-		if (snake_2[0].dir == RIGHT)
+		if (current_dir == RIGHT)
 		{
-			detour = TRUE;
-			if (board[snake_2[0].y - 1][snake_2[0].x] == EMPTY_TILE)
+			*obs = TRUE;
+			if (board[y - 1][x] == EMPTY_TILE)
 			{
-				prev_dir = RIGHT;
+				*prev_dir = RIGHT;
 				return UP;
 			}
-			else if (board[snake_2[0].y + 1][snake_2[0].x] == EMPTY_TILE)
+			else if (board[y + 1][x] == EMPTY_TILE)
 			{
-				prev_dir = RIGHT;
+				*prev_dir = RIGHT;
 				return DOWN;
 			}
 		}
@@ -969,35 +1008,35 @@ int greedy()
 	}
 }
 
-int turn_right()
+int turn_right(int current_dir, int x, int y, int* obs, int* prev_dir)
 {
 	char next_tile;
 	
-	switch(snake_2[0].dir)
+	switch(current_dir)
 	{
 		case UP:
-			next_tile = board[(snake_2[0].y == 0 ? ROWS - 1 : snake_2[0].y - 1)][snake_2[0].x];
+			next_tile = board[(y == 0 ? ROWS - 1 : y - 1)][x];
 			if (next_tile == EMPTY_TILE || next_tile == FOOD)
 				return UP;
 			else
 				return RIGHT;
 		
 		case RIGHT:
-			next_tile = board[snake_2[0].y][(snake_2[0].x == COLS - 1 ? 0 : snake_2[0].x + 1)];
+			next_tile = board[y][(x == COLS - 1 ? 0 : x + 1)];
 			if (next_tile == EMPTY_TILE || next_tile == FOOD)
 				return RIGHT;
 			else
 				return DOWN;
 		
 		case DOWN:
-			next_tile = board[(snake_2[0].y == ROWS - 1 ? 0 : snake_2[0].y + 1)][snake_2[0].x];
+			next_tile = board[(y == ROWS - 1 ? 0 : y + 1)][x];
 			if (next_tile == EMPTY_TILE || next_tile == FOOD)
 				return DOWN;
 			else 
 				return LEFT;
 		
 		case LEFT:
-			next_tile = board[snake_2[0].y][(snake_2[0].x == 0 ? COLS - 1 : snake_2[0].x - 1)];
+			next_tile = board[y][(x == 0 ? COLS - 1 : x - 1)];
 			if (next_tile == EMPTY_TILE || next_tile == FOOD)
 				return LEFT;
 			else
@@ -1078,8 +1117,9 @@ void print_status(const char* status, int len)
 int welcome_screen()
 {
 	char user_choice;
-
-	printf("Make your choice...\n1 - Single Player\n2 - Two Players\nq - Quit\n");	
+	
+	//Get number of players
+	printf("Choose your game mode...\n\t1 - Single Player\n\t2 - Two Players\n\tq - Quit\n");	
 	do
 	{
 		user_choice = getchar();
@@ -1094,9 +1134,44 @@ int welcome_screen()
 			return -1;
 		}
 		else
-			printf("Error: Invalid choice - '%c'(%d)\n", user_choice, user_choice);
+			fprintf(stderr, "Error: Invalid choice - '%c'(%d)\n", user_choice, user_choice);
 	} while (user_choice != '1' && user_choice != '2' && user_choice != 'q');
-
+	
+	//Get controller for player 1
+	printf("Choose controller for Player 1...\n\ta - AI\n\tb - Human\n");
+	do
+	{
+		user_choice = getchar();
+		
+		if (user_choice == 'a')
+			p1_mode = AI;
+		else if (user_choice == 'b')
+			p1_mode = HUMAN;
+		else
+			fprintf(stderr, "Error: Invalid choice - '%c'(%d)\n", user_choice, user_choice);
+			
+	} while (user_choice != 'a' && user_choice != 'b');
+	
+	//Get controller for player 2
+	if (num_players == 2)
+	{
+		printf("Choose controller for Player 2...\n\ta - AI\n\tb - Human\n");
+		do
+		{
+			user_choice = getchar();
+		
+			if (user_choice == 'a')
+				p2_mode = AI;
+			else if (user_choice == 'b')
+				p2_mode = HUMAN;
+			else
+				fprintf(stderr, "Error: Invalid choice - '%c'(%d)\n", user_choice, user_choice);
+			
+		} while (user_choice != 'a' && user_choice != 'b');
+	}
+	else
+		p2_mode = AI;
+		
 	return 0;
 }
 
@@ -1118,7 +1193,11 @@ void init_term()
 	fcntl(STDIN_FILENO, F_SETOWN, getpid());
 	setbuf(stdin, NULL);
 	setvbuf(stdout, NULL, _IOFBF, 1024);
-	signal(SIGIO, keyboard_handler);
+	
+	//If either of the snakes are human controlled, then the keyboard handler needs to be turned on
+	//if (p1_mode == HUMAN || p2_mode == HUMAN)
+		signal(SIGIO, keyboard_handler);
+		
 	signal(SIGTERM, cleanup_handler);
 	signal(SIGINT, cleanup_handler);
 	key_received = FALSE;
@@ -1127,6 +1206,7 @@ void init_term()
 
 void keyboard_handler(int end)
 {
+	//FIXME: make sure IO doesn't over-write AI algo
 	#ifndef FPGA
 		key = getchar();
 		key_received = TRUE;
@@ -1292,10 +1372,12 @@ void keyboard_handler(int end)
 void cleanup_handler(int end)
 {
 	free(snake_1);
-	free(snake_2);
+	if (num_players == 2)
+		free(snake_2);
 	//Close the pb_driver
 	#ifdef FPGA
 		close(pb_file);
+		close(timer_dev);
 	#endif
 	
 	int row = 0;
